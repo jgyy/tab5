@@ -12,6 +12,7 @@
 #include "trial_map.h"
 #include "trial_state.h"
 #include "trial_view.h"
+#include "settings.h"
 
 namespace {
 // kRenderSize/kHeaderHeight/kCrystalTopGap live in ui.h — shared with ui.cpp so the
@@ -60,13 +61,16 @@ TrialState gTrialState;
 bool gTrialStarted = false;
 uint32_t gLastTrialTickMs = 0;
 
+uint8_t gBrightness = kMaxBrightness;
+uint8_t gVolume = kMaxVolume / 2;
+
 void refreshRealmVisual() {
     gRealmVisual = growForRealm(gBaseMesh, gState.realmIndex);
 }
 
 void saveNow() {
     int64_t nowEpoch = readRtcEpochSeconds();
-    nvsWriteSave(toSaveData(gState, nowEpoch));
+    nvsWriteSave(toSaveData(gState, nowEpoch, gBrightness, gVolume));
 }
 }
 
@@ -117,6 +121,11 @@ void setup() {
     gState = toGameState(save);
     gBaseMesh = makeIcosahedron();
     refreshRealmVisual();
+
+    gBrightness = clampBrightness(save.brightness);
+    gVolume = clampVolume(save.volume);
+    M5.Display.setBrightness(gBrightness);
+    M5.Speaker.setVolume(gVolume);
 
     gCrystalX = (M5.Display.width() - kRenderSize) / 2; // centered; see ui.h's layout comment
     gCrystalY = kHeaderHeight + kCrystalTopGap;
@@ -199,6 +208,22 @@ void loop() {
             if (purchaseGenerator(gState, button - HUD_BUTTON_GENERATOR_BASE)) {
                 stateChanged = true;
             }
+        } else if (button == HUD_BUTTON_BRIGHTNESS_DOWN) {
+            gBrightness = clampBrightness(static_cast<int>(gBrightness) - kSettingsStep);
+            M5.Display.setBrightness(gBrightness);
+            stateChanged = true;
+        } else if (button == HUD_BUTTON_BRIGHTNESS_UP) {
+            gBrightness = clampBrightness(static_cast<int>(gBrightness) + kSettingsStep);
+            M5.Display.setBrightness(gBrightness);
+            stateChanged = true;
+        } else if (button == HUD_BUTTON_VOLUME_DOWN) {
+            gVolume = clampVolume(static_cast<int>(gVolume) - kSettingsStep);
+            M5.Speaker.setVolume(gVolume);
+            stateChanged = true;
+        } else if (button == HUD_BUTTON_VOLUME_UP) {
+            gVolume = clampVolume(static_cast<int>(gVolume) + kSettingsStep);
+            M5.Speaker.setVolume(gVolume);
+            stateChanged = true;
         }
         if (stateChanged) {
             saveNow();
@@ -233,7 +258,7 @@ void loop() {
         gCanvas->pushSprite(gCrystalX, gCrystalY);
 
         if (now - gLastHudDrawMs >= kHudRedrawIntervalMs) {
-            drawHud(M5.Display, gState);
+            drawHud(M5.Display, gState, gBrightness, gVolume);
             gLastHudDrawMs = now;
         }
 

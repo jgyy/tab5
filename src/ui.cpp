@@ -36,6 +36,7 @@ constexpr int kSectionGap = 8;
 constexpr int kQiReadoutHeight = 70;
 constexpr int kBreakthroughHeight = 72;
 constexpr int kEnterRealmHeight = 64;
+constexpr int kSettingsRowHeight = 48; // compact: one row each for brightness and volume
 constexpr int kRowMinHeight = 40; // floor so rows never collapse to nothing on a tiny display
 
 struct Layout {
@@ -49,6 +50,8 @@ struct Layout {
     int rowHeight = 0;
     int breakthroughY = 0;  // absolute y of the breakthrough button
     int enterRealmY = 0;    // absolute y of the "Enter Secret Realm" button
+    int brightnessY = 0;    // absolute y of the brightness settings row
+    int volumeY = 0;        // absolute y of the volume settings row
 };
 Layout gLayout;
 
@@ -61,7 +64,9 @@ void computeLayout(int screenW, int screenH) {
     gLayout.panelH = screenH - gLayout.panelY0;
 
     int afterQi = kPanelTopPad + kQiReadoutHeight + kSectionGap; // panel-local y where rows start
-    int reservedBottom = kSectionGap + kBreakthroughHeight + kSectionGap + kEnterRealmHeight + kPanelBottomPad;
+    int reservedBottom = kSectionGap + kBreakthroughHeight + kSectionGap + kEnterRealmHeight +
+                          kSectionGap + kSettingsRowHeight + kSectionGap + kSettingsRowHeight +
+                          kPanelBottomPad;
     int rowsArea = gLayout.panelH - afterQi - reservedBottom;
     int minRowsArea = NUM_GENERATORS * kRowMinHeight;
     if (rowsArea < minRowsArea) rowsArea = minRowsArea;
@@ -70,6 +75,8 @@ void computeLayout(int screenW, int screenH) {
     gLayout.rowY0 = gLayout.panelY0 + afterQi;
     gLayout.breakthroughY = gLayout.rowY0 + gLayout.rowHeight * NUM_GENERATORS + kSectionGap;
     gLayout.enterRealmY = gLayout.breakthroughY + kBreakthroughHeight + kSectionGap;
+    gLayout.brightnessY = gLayout.enterRealmY + kEnterRealmHeight + kSectionGap;
+    gLayout.volumeY = gLayout.brightnessY + kSettingsRowHeight + kSectionGap;
 }
 
 Rect qiReadoutRect() {
@@ -87,6 +94,19 @@ Rect breakthroughRect() {
 Rect enterSecretRealmRect() {
     return Rect{0, gLayout.enterRealmY, gLayout.screenW, kEnterRealmHeight};
 }
+
+Rect brightnessRowRect() {
+    return Rect{0, gLayout.brightnessY, gLayout.screenW, kSettingsRowHeight};
+}
+
+Rect volumeRowRect() {
+    return Rect{0, gLayout.volumeY, gLayout.screenW, kSettingsRowHeight};
+}
+
+// Each settings row is one tappable strip split into a left ("-") and right ("+") half,
+// rather than four separate button rects, to keep the added panel footprint compact.
+Rect leftHalf(const Rect& r) { return Rect{r.x, r.y, r.w / 2, r.h}; }
+Rect rightHalf(const Rect& r) { return Rect{r.x + r.w / 2, r.y, r.w - r.w / 2, r.h}; }
 
 // Fixed strip at the bottom of the screen, independent of gLayout (which describes the idle
 // view's panel) - see kReturnButtonHeight's comment in ui.h for why this stays a raw screen-
@@ -178,7 +198,7 @@ void drawHeader(M5GFX& display, const GameState& state) {
     hdr.pushSprite(0, 0);
 }
 
-void drawHud(M5GFX& display, const GameState& state) {
+void drawHud(M5GFX& display, const GameState& state, uint8_t brightness, uint8_t volume) {
     if (!gHudCanvas) initHud(display);
     drawHeader(display, state);
 
@@ -243,6 +263,22 @@ void drawHud(M5GFX& display, const GameState& state) {
     }
     drawLeftAligned(hud, erLine, 12, erly + er.h / 2, er.w - 24, 2, TFT_WHITE, erBg);
 
+    // Settings rows: each is one strip split into a "-" left half and "+" right half (see
+    // leftHalf()/rightHalf()), rather than four separate buttons, to stay compact.
+    Rect brRow = brightnessRowRect();
+    int brly = brRow.y - gLayout.panelY0;
+    hud.fillRect(0, brly, brRow.w, brRow.h, TFT_DARKGREY);
+    char brLine[32];
+    snprintf(brLine, sizeof(brLine), "-  Brightness %d%%  +", (brightness * 100) / 255);
+    drawLeftAligned(hud, brLine, 12, brly + brRow.h / 2, brRow.w - 24, 2, TFT_WHITE, TFT_DARKGREY);
+
+    Rect volRow = volumeRowRect();
+    int voly = volRow.y - gLayout.panelY0;
+    hud.fillRect(0, voly, volRow.w, volRow.h, TFT_DARKGREY);
+    char volLine[32];
+    snprintf(volLine, sizeof(volLine), "-  Volume %d%%  +", (volume * 100) / 255);
+    drawLeftAligned(hud, volLine, 12, voly + volRow.h / 2, volRow.w - 24, 2, TFT_WHITE, TFT_DARKGREY);
+
     hud.pushSprite(0, gLayout.panelY0);
 }
 
@@ -265,5 +301,11 @@ int hitTestHud(int touchX, int touchY, bool inTrialMode) {
     if (rectContains(enterSecretRealmRect(), touchX, touchY)) {
         return HUD_BUTTON_ENTER_SECRET_REALM;
     }
+    Rect brRow = brightnessRowRect();
+    if (rectContains(leftHalf(brRow), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_DOWN;
+    if (rectContains(rightHalf(brRow), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_UP;
+    Rect volRow = volumeRowRect();
+    if (rectContains(leftHalf(volRow), touchX, touchY)) return HUD_BUTTON_VOLUME_DOWN;
+    if (rectContains(rightHalf(volRow), touchX, touchY)) return HUD_BUTTON_VOLUME_UP;
     return HUD_BUTTON_NONE;
 }

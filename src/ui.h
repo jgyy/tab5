@@ -10,6 +10,10 @@ enum HudButton {
     HUD_BUTTON_BREAKTHROUGH = 100,
     HUD_BUTTON_ENTER_SECRET_REALM = 101,
     HUD_BUTTON_RETURN_TO_CULTIVATION = 102,
+    HUD_BUTTON_BRIGHTNESS_DOWN = 103,
+    HUD_BUTTON_BRIGHTNESS_UP = 104,
+    HUD_BUTTON_VOLUME_DOWN = 105,
+    HUD_BUTTON_VOLUME_UP = 106,
     // Generator buy buttons use HUD_BUTTON_GENERATOR_BASE + genIndex (0..NUM_GENERATORS-1).
     HUD_BUTTON_GENERATOR_BASE = 0,
 };
@@ -50,7 +54,10 @@ void initHud(M5GFX& display);
 // breakthrough panel) can still keep the economy readout live while showing.
 void drawHeader(M5GFX& display, const GameState& state);
 
-void drawHud(M5GFX& display, const GameState& state);
+// brightness/volume (raw 0-255 device-setting values, not part of GameState) are shown as a
+// pair of tappable rows below the breakthrough/enter-realm buttons; see HUD_BUTTON_BRIGHTNESS_*
+// /HUD_BUTTON_VOLUME_* for their hit-test ids.
+void drawHud(M5GFX& display, const GameState& state, uint8_t brightness, uint8_t volume);
 
 // Hit-tests a touch point against the currently-relevant button set: the idle view's
 // generator/breakthrough/enter-secret-realm buttons when `inTrialMode` is false, or just the
