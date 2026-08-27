@@ -3,6 +3,7 @@
 #include "mesh.h"
 #include "framebuffer.h"
 #include "rasterizer.h"
+#include "nvs_store.h"
 
 namespace {
 constexpr int kRenderSize = 240; // offscreen 3D viewport, square; tune based on measured FPS below
