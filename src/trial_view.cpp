@@ -9,15 +9,17 @@
 namespace {
 // The raycaster computes at this resolution - deliberately close to the crystal's old
 // hardware-proven 240x240 pixel-fill cost (240x320 = ~33% more pixels, same order of
-// magnitude), then displayed scaled up via pushRotateZoom (kTrialZoom) to fill the raycast
-// viewport without paying full-resolution compute cost.
+// magnitude), then displayed scaled up via pushRotateZoom to fill the raycast viewport
+// without paying full-resolution compute cost.
 constexpr int kTrialViewWidth = 240;
 constexpr int kTrialViewHeight = 320;
-// May need retuning on real hardware: this value was tuned for the old "between header and
-// return-button strip" region (roughly the whole screen minus the header); the viewport is
-// now deliberately half that height. See the design spec's Open Risk note - unverified without
-// a physical Tab5.
-constexpr float kTrialZoom = 2.5f;
+// The display zoom used to be a fixed constant (kTrialZoom), which silently drifted out of
+// sync with the viewport once the viewport height changed - it's now computed live in
+// renderTrialView() from raycastViewportBottom()/kHeaderHeight instead, so it can never
+// overflow the viewport again regardless of display size or future layout changes. What
+// remains genuinely unverified without a physical Tab5 is achievable FPS at this render
+// resolution (kTrialViewWidth/kTrialViewHeight) - raycasting is much cheaper per pixel than
+// the old crystal's triangle rasterizer, but the actual number is unconfirmed.
 constexpr float kFovRadians = 1.02f;  // ~60 degrees
 constexpr float kMaxRayDistance = 20.0f;
 
@@ -130,14 +132,20 @@ void renderTrialView(M5GFX& display, const TrialState& state) {
 
     gTrialCanvas->pushImage(0, 0, kTrialViewWidth, kTrialViewHeight, gPixelBuffer.data());
 
-    // Scaled push: displays the small internal buffer stretched to fill the raycast viewport,
-    // centered horizontally and vertically within it. Default sprite pivot is its own center,
-    // so (centerX, centerY) here is where that center lands on the physical display.
+    // Scaled push: displays the small internal buffer centered horizontally and vertically
+    // within the raycast viewport. Default sprite pivot is its own center, so (centerX,
+    // centerY) here is where that center lands on the physical display.
     float availableTop = kHeaderHeight;
     float availableBottom = raycastViewportBottom(display.height());
     float centerX = display.width() / 2.0f;
     float centerY = availableTop + (availableBottom - availableTop) / 2.0f;
-    gTrialCanvas->pushRotateZoom(centerX, centerY, 0.0f, kTrialZoom, kTrialZoom);
+    // Zoom the internal buffer up to fill the raycast viewport without overflowing it -
+    // computed live from the actual viewport height (not a fixed constant) so this can never
+    // drift out of sync with raycastViewportBottom() again, the way the old fixed-2.5 value
+    // silently did once the viewport was halved. Uniform scale (not stretched to fill width)
+    // preserves aspect ratio; this may leave a small black margin on the sides, which is fine.
+    float zoom = (availableBottom - availableTop) / static_cast<float>(kTrialViewHeight);
+    gTrialCanvas->pushRotateZoom(centerX, centerY, 0.0f, zoom, zoom);
 }
 
 void playAttackSfx() {

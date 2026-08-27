@@ -197,9 +197,14 @@ void loop() {
         playVictorySfx();
         gState.qi += gTrialState.qiRewardPending;
         saveNow();
-        renderTrialView(M5.Display, gTrialState); // show the "Cleared!" frame before pausing
+        renderTrialView(M5.Display, gTrialState); // show the raycast frame...
+        drawHud(M5.Display, gState, gTrialState, gBrightness, gVolume); // ...with "Cleared!" in the route bar, before pausing
+        gLastHudDrawMs = now; // this was an explicit/forced draw; keep the throttle in sync
         delay(1500);
         restartTrial(gTrialState, gState.realmIndex); // resets qiRewardPending to 0.0 and loops back
+        gLastTrialTickMs = millis(); // avoid a huge simulated dt on the next tick from the ~1.7s of
+                                      // delay() above (SFX + the pause) that gLastTrialTickMs doesn't
+                                      // otherwise account for
     } else {
         renderTrialView(M5.Display, gTrialState);
     }

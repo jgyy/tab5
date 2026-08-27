@@ -105,15 +105,17 @@ Implementation plan: `docs/superpowers/plans/2026-08-27-raycasting-only-revamp.m
 **Known limitation — not yet validated on real hardware.** Unlike the old crystal's
 `kRenderSize = 240`, which was empirically tuned against measured on-device FPS (Task 8 of
 the original idle-game plan), no physical Tab5 was connected while this mode was built, so
-its render resolution (240×320 internally) and display scale (`kTrialZoom = 2.5`) are a
-conservative starting guess, not a benchmarked value — raycasting is much cheaper per pixel
-than the old crystal's triangle rasterizer, but the actual achievable FPS at this scale is
-unconfirmed. The raycasting-only revamp makes this *more* likely to need retuning, not less:
-`kTrialZoom` was originally tuned to cover roughly the whole screen between the header and a
-return-button strip, and the viewport is now deliberately half that height, to make room for
-the stats panel below it. If it runs slower than expected on real hardware, `kTrialZoom` in
-`src/trial_view.cpp` is the cheap knob to lower first (it only affects display scale, not
-raycasting cost); `kTrialViewWidth`/`kTrialViewHeight` affect actual compute cost. The full
+its render resolution (240×320 internally) is a conservative starting guess, not a
+benchmarked value — raycasting is much cheaper per pixel than the old crystal's triangle
+rasterizer, but the actual achievable FPS at this resolution is unconfirmed. Viewport *fit*
+is no longer part of this risk: the display scale used to be a fixed constant (`kTrialZoom`)
+tuned for the old, much taller "header to return-button strip" region, and it silently
+overflowed into the header and stats panel once the raycasting-only revamp halved the
+viewport height. That constant is gone — `renderTrialView()` in `src/trial_view.cpp` now
+computes the zoom live from the actual viewport (`raycastViewportBottom()`/`kHeaderHeight`),
+so it can never overflow regardless of display size or future layout changes. If it runs
+slower than expected on real hardware, `kTrialViewWidth`/`kTrialViewHeight` in
+`src/trial_view.cpp` are the knobs that affect actual compute cost. The full
 esp32p4_pioarduino build does compile and link successfully (verified in this environment),
 but flashing and visually/FPS-testing it on the device is the next step for whoever has it.
 
