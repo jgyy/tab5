@@ -1,0 +1,63 @@
+#include "save.h"
+#include <cstring>
+
+SaveData defaultSaveData() {
+    return SaveData{};
+}
+
+SaveData toSaveData(const GameState& state, int64_t epochSeconds) {
+    SaveData d;
+    d.qi = state.qi;
+    for (int i = 0; i < NUM_GENERATORS; ++i) {
+        d.generatorCounts[i] = static_cast<uint32_t>(state.generatorCounts[i]);
+    }
+    d.realmIndex = static_cast<uint8_t>(state.realmIndex);
+    d.lastSaveEpochSeconds = epochSeconds;
+    return d;
+}
+
+GameState toGameState(const SaveData& data) {
+    GameState s;
+    s.qi = data.qi;
+    for (int i = 0; i < NUM_GENERATORS; ++i) {
+        s.generatorCounts[i] = static_cast<int>(data.generatorCounts[i]);
+    }
+    s.realmIndex = data.realmIndex;
+    return s;
+}
+
+namespace {
+uint32_t fnv1aChecksum(const uint8_t* data, size_t len) {
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= data[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+}
+
+size_t serializeSave(const SaveData& data, uint8_t* outBuffer, size_t bufferLen) {
+    if (bufferLen < SAVE_BUFFER_SIZE) return 0;
+    std::memcpy(outBuffer, &data, sizeof(SaveData));
+    uint32_t checksum = fnv1aChecksum(outBuffer, sizeof(SaveData));
+    std::memcpy(outBuffer + sizeof(SaveData), &checksum, sizeof(uint32_t));
+    return SAVE_BUFFER_SIZE;
+}
+
+bool deserializeSave(const uint8_t* buffer, size_t bufferLen, SaveData& outData) {
+    if (bufferLen < SAVE_BUFFER_SIZE) return false;
+
+    SaveData candidate;
+    std::memcpy(&candidate, buffer, sizeof(SaveData));
+
+    uint32_t storedChecksum;
+    std::memcpy(&storedChecksum, buffer + sizeof(SaveData), sizeof(uint32_t));
+
+    if (fnv1aChecksum(buffer, sizeof(SaveData)) != storedChecksum) return false;
+    if (candidate.magic != SAVE_MAGIC) return false;
+    if (candidate.version != SAVE_VERSION) return false;
+
+    outData = candidate;
+    return true;
+}
