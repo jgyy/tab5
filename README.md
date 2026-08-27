@@ -46,6 +46,44 @@ available in this toolchain) checked against leap-year and century-boundary edge
 Design spec: `docs/superpowers/specs/2026-08-27-xianxia-idle-game-design.md`
 Implementation plan: `docs/superpowers/plans/2026-08-27-xianxia-idle-game.md`
 
+### Secret Realm (raycasting trial mode)
+
+A "Secret Realm" reachable from the idle view via a HUD button once you reach Foundation
+Establishment (`realmIndex >= 2`). It's a small fixed maze rendered with classic DDA
+raycasting (Wolfenstein/Doom-style: one ray per screen column, textured walls, billboarded
+enemy sprites depth-tested against the wall raycast so nearer walls correctly hide them) —
+an entirely separate rendering pipeline from the crystal's triangle rasterizer, since
+raycasting is the right tool for a full-screen first-person view and sidesteps the
+painter's-algorithm rasterizer's inability to correctly sort multiple independent
+overlapping objects.
+
+Like the rest of this game, the trial **autoplays**: the camera follows a scripted waypoint
+route through the maze and auto-fights enemies it encounters (tick-based, deterministic, no
+RNG), the same "the game plays itself" philosophy the crystal and generators already use.
+Combat stats derive from cultivation progress (`playerMaxHP = 100 + 40 * realmIndex`,
+`playerAttackDamage = 10 + 6 * realmIndex`), so a weak cultivator can genuinely lose to a
+later enemy — on defeat, the trial resets to its start with full HP and no permanent penalty
+(only time lost); clearing it grants a Qi reward back into the main economy and loops. Wall
+textures and the attack/hit/victory sound effects are procedurally generated in code (a
+deterministic hash-based pattern, the same technique `mesh.cpp`'s `hashJaggedness` uses) —
+no imported image or audio assets, consistent with the rest of this project.
+
+Design spec: `docs/superpowers/specs/2026-08-27-secret-realm-raycasting-design.md`
+Implementation plan: `docs/superpowers/plans/2026-08-27-secret-realm-raycasting.md`
+
+**Known limitation — not yet validated on real hardware.** Unlike the crystal's
+`kRenderSize = 240`, which was empirically tuned against measured on-device FPS (Task 8 of
+the original plan), no physical Tab5 was connected while this mode was built, so its render
+resolution (240×320 internally) and display scale (`kTrialZoom = 2.5`, covering roughly
+600×800 pixels of the screen) are a conservative starting guess, not a benchmarked value —
+raycasting is much cheaper per pixel than the crystal's triangle rasterizer, but the actual
+achievable FPS at this scale is unconfirmed. If it runs slower than expected on real
+hardware, `kTrialZoom` in `src/trial_view.cpp` is the cheap knob to lower first (it only
+affects display scale, not raycasting cost); `kTrialViewWidth`/`kTrialViewHeight` affect
+actual compute cost. The full esp32p4_pioarduino build does compile and link successfully
+(verified in this environment), but flashing and visually/FPS-testing it on the device is
+the next step for whoever has it.
+
 ### Building & Flashing
 
 Requires [PlatformIO](https://platformio.org/):
@@ -63,9 +101,10 @@ python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200
 ### Running Tests
 
 Game logic (3D math, procedural mesh growth, the software rasterizer, the idle-game
-economy, save serialization, offline-earnings math, HUD hit-testing) is hardware-agnostic
-C++ under `lib/core/`, unit-tested on the host machine — no device required. 48 test
-cases across 8 suites, all passing:
+economy, save serialization, offline-earnings math, HUD hit-testing, DDA raycasting, the
+Secret Realm's fixed map/route/enemies, its combat resolution, its autoplay orchestration,
+and its procedural wall textures) is hardware-agnostic C++ under `lib/core/`, unit-tested on
+the host machine — no device required. 78 test cases across 13 suites, all passing:
 
 ```bash
 python3 -m platformio test -e native
@@ -77,9 +116,15 @@ flashes across this project with zero panic/crash/watchdog signatures.
 
 ### Project Layout
 
-- `lib/core/` — hardware-agnostic game logic, unit-tested via the `native` PlatformIO environment.
+- `lib/core/` — hardware-agnostic game logic, unit-tested via the `native` PlatformIO
+  environment: `math3d`/`mesh`/`rasterizer` (the crystal's 3D pipeline), `economy`/`save`/
+  `offline_earnings` (the idle-game loop and persistence), `raycast` (DDA raycasting core),
+  `trial_map`/`trial_combat`/`trial_state`/`trial_textures` (the Secret Realm's fixed map,
+  combat resolution, autoplay orchestration, and procedural wall textures).
 - `src/` — Arduino/M5Unified/M5GFX glue: `main.cpp` (setup/loop, the 50ms game tick,
-  automation), `ui.h`/`ui.cpp` (HUD layout and drawing), `nvs_store`/`rtc_store`
-  (persistence and offline-earnings glue).
+  automation, the idle/trial `ViewMode` switch), `ui.h`/`ui.cpp` (HUD layout, drawing, and
+  hit-testing for both view modes), `trial_view.h`/`trial_view.cpp` (raycast rendering and
+  SFX for the Secret Realm), `nvs_store`/`rtc_store` (persistence and offline-earnings glue).
 - `test/` — one PlatformIO test suite per `lib/core/` module.
-- `docs/superpowers/specs/`, `docs/superpowers/plans/` — design spec and implementation plan for this feature.
+- `docs/superpowers/specs/`, `docs/superpowers/plans/` — design specs and implementation
+  plans for the xianxia idle game and the Secret Realm trial mode.
