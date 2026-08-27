@@ -1,25 +1,23 @@
 #include "trial_view.h"
 #include "raycast.h"
 #include "trial_textures.h"
-#include "framebuffer.h"
-#include "ui.h" // kHeaderHeight, for vertical centering below the header bar
+#include "color.h"
+#include "ui.h" // kHeaderHeight, raycastViewportBottom() - shared viewport bounds
 #include <cmath>
 #include <vector>
 
 namespace {
-// The raycaster computes at this resolution - deliberately close to the crystal's
+// The raycaster computes at this resolution - deliberately close to the crystal's old
 // hardware-proven 240x240 pixel-fill cost (240x320 = ~33% more pixels, same order of
-// magnitude) rather than guessing a full native 720x1280 buffer with no way to benchmark it
-// in this environment. It's then displayed scaled up via pushRotateZoom (kTrialZoom) to
-// cover most of the screen without paying full-resolution compute cost - "near-full-screen"
-// per the design spec's own hedge on this point. If on-device FPS testing shows headroom,
-// kTrialViewWidth/Height and kTrialZoom are the two knobs to raise; if it's too slow, lower
-// kTrialZoom first (cheap - it only affects display scale, not raycasting cost), then
-// kTrialViewWidth/Height (which does affect cost). See README for the on-device validation
-// this still needs.
+// magnitude), then displayed scaled up via pushRotateZoom (kTrialZoom) to fill the raycast
+// viewport without paying full-resolution compute cost.
 constexpr int kTrialViewWidth = 240;
 constexpr int kTrialViewHeight = 320;
-constexpr float kTrialZoom = 2.5f; // -> displayed at ~600x800 pixels on screen
+// May need retuning on real hardware: this value was tuned for the old "between header and
+// return-button strip" region (roughly the whole screen minus the header); the viewport is
+// now deliberately half that height. See the design spec's Open Risk note - unverified without
+// a physical Tab5.
+constexpr float kTrialZoom = 2.5f;
 constexpr float kFovRadians = 1.02f;  // ~60 degrees
 constexpr float kMaxRayDistance = 20.0f;
 
@@ -100,7 +98,7 @@ void renderTrialView(M5GFX& display, const TrialState& state) {
 
         RGB base = wallBaseColorFor(hit.wallType);
         // Shade the darker of the two DDA hit orientations to fake directional lighting,
-        // matching the crystal renderer's cheap-but-effective shading philosophy.
+        // matching the crystal renderer's old cheap-but-effective shading philosophy.
         if (!hit.hitVertical) {
             base.r = static_cast<uint8_t>(base.r * 0.75f);
             base.g = static_cast<uint8_t>(base.g * 0.75f);
@@ -132,48 +130,14 @@ void renderTrialView(M5GFX& display, const TrialState& state) {
 
     gTrialCanvas->pushImage(0, 0, kTrialViewWidth, kTrialViewHeight, gPixelBuffer.data());
 
-    // Slim HUD strip along the top of the canvas: enemy HP bar while fighting, otherwise
-    // route progress. Drawn directly on the canvas before pushing to the display.
-    gTrialCanvas->fillRect(0, 0, kTrialViewWidth, 12, TFT_BLACK);
-    if (state.phase == TrialPhase::Fighting) {
-        float hpFraction = static_cast<float>(state.enemy.hp) /
-                            static_cast<float>(state.enemy.maxHp > 0 ? state.enemy.maxHp : 1);
-        int barWidth = static_cast<int>((kTrialViewWidth - 4) * hpFraction);
-        gTrialCanvas->fillRect(2, 2, barWidth, 8, TFT_RED);
-    } else if (state.phase == TrialPhase::Cleared) {
-        gTrialCanvas->setTextColor(TFT_GOLD, TFT_BLACK);
-        gTrialCanvas->setCursor(2, 2);
-        gTrialCanvas->print("Secret Realm Cleared!");
-    } else {
-        float progress = static_cast<float>(state.currentWaypointIndex) /
-                          static_cast<float>(state.map.route.size() > 1
-                                                  ? state.map.route.size() - 1
-                                                  : 1);
-        int barWidth = static_cast<int>((kTrialViewWidth - 4) * progress);
-        gTrialCanvas->fillRect(2, 2, barWidth, 8, TFT_GREEN);
-    }
-
-    // Scaled push: displays the small internal buffer stretched to cover most of the screen,
-    // centered horizontally and vertically within the space between the header bar and the
-    // reserved "Return to Cultivation" strip at the bottom. Default sprite pivot is its own
-    // center, so (centerX, centerY) here is where that center lands on the physical display.
+    // Scaled push: displays the small internal buffer stretched to fill the raycast viewport,
+    // centered horizontally and vertically within it. Default sprite pivot is its own center,
+    // so (centerX, centerY) here is where that center lands on the physical display.
     float availableTop = kHeaderHeight;
-    float availableBottom = display.height() - kReturnButtonHeight;
+    float availableBottom = raycastViewportBottom(display.height());
     float centerX = display.width() / 2.0f;
     float centerY = availableTop + (availableBottom - availableTop) / 2.0f;
     gTrialCanvas->pushRotateZoom(centerX, centerY, 0.0f, kTrialZoom, kTrialZoom);
-
-    // "Return to Cultivation" button: drawn directly on `display` (not the trial canvas)
-    // since it lives in the fixed bottom strip outside the scaled raycast view. hit-tested by
-    // ui.cpp's hitTestHud(..., /*inTrialMode=*/true) against the same kReturnButtonHeight rect.
-    int returnY = display.height() - kReturnButtonHeight;
-    display.fillRect(0, returnY, display.width(), kReturnButtonHeight, TFT_DARKGREY);
-    display.setTextSize(3);
-    display.setTextColor(TFT_WHITE, TFT_DARKGREY);
-    const char* label = "Return to Cultivation";
-    int textW = display.textWidth(label);
-    display.setCursor((display.width() - textW) / 2, returnY + (kReturnButtonHeight - display.fontHeight()) / 2);
-    display.print(label);
 }
 
 void playAttackSfx() {

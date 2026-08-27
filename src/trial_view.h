@@ -6,10 +6,11 @@
 void initTrialView(M5GFX& display);
 
 // Renders one frame of the Secret Realm trial (raycast walls/floor/ceiling, billboarded
-// sprites for every undefeated enemy depth-tested against the wall raycast, and a slim HUD
-// strip showing either the enemy HP bar while Fighting or route progress otherwise) into an
-// internal offscreen canvas, then displays it scaled up to cover most of `display` via
-// pushRotateZoom. Does not advance `state` - call tickTrial() separately in the game loop.
+// sprites for every undefeated enemy depth-tested against the wall raycast) into an internal
+// offscreen canvas, then displays it scaled up to fill the raycast viewport - the top half of
+// the screen below the header, see ui.h's raycastViewportBottom() - via pushRotateZoom.
+// Player/enemy HP and route progress are drawn by ui.cpp's drawHud() instead, not here.
+// Does not advance `state` - call tickTrial() separately in the game loop.
 void renderTrialView(M5GFX& display, const TrialState& state);
 
 // Simple procedural SFX (no imported audio assets), played by main.cpp at the relevant

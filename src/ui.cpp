@@ -5,9 +5,8 @@
 
 // Compact display formatting for Qi-scale numbers, which grow into the tens of
 // millions (REALM_QI_THRESHOLD tops out at 27,000,000) — a raw "%.0f" would
-// overflow a generator row or the header at any reasonable text size. Declared in
-// ui.h (not anonymous-namespace-local) so main.cpp's welcome-back screen can reuse
-// it for the same K/M/B formatting the rest of the HUD uses.
+// overflow a bar's label at any reasonable text size. Declared in ui.h (not
+// anonymous-namespace-local) so main.cpp's welcome-back screen can reuse it.
 void formatQi(double v, char* out, size_t outLen) {
     double av = v < 0 ? -v : v;
     const char* sign = v < 0 ? "-" : "";
@@ -22,101 +21,63 @@ void formatQi(double v, char* out, size_t outLen) {
     }
 }
 
+int raycastViewportBottom(int screenH) {
+    return kHeaderHeight + (screenH - kHeaderHeight) / 2;
+}
+
 namespace {
 
 // ---- Layout tuning ----
-// The real M5Tab5 panel is 720x1280 (portrait) — confirmed by reading it
-// straight from the fetched M5GFX source and from a live [DISPLAY] serial
-// print, NOT the 1280x720 landscape shape a "tablet" name suggests. So the
-// layout here is a vertical stack (header -> crystal -> panel), each spanning
-// the screen's full width, rather than a landscape side-by-side split.
 constexpr int kPanelTopPad = 12;
-constexpr int kPanelBottomPad = 16;
-constexpr int kSectionGap = 8;
-constexpr int kQiReadoutHeight = 70;
-constexpr int kBreakthroughHeight = 72;
-constexpr int kEnterRealmHeight = 64;
+constexpr int kSectionGap = 10;
+constexpr int kBreakthroughBarHeight = 40;
+constexpr int kHpBarHeight = 36;
+constexpr int kRouteBarHeight = 28;
 constexpr int kSettingsRowHeight = 48; // compact: one row each for brightness and volume
-constexpr int kRowMinHeight = 40; // floor so rows never collapse to nothing on a tiny display
 
 struct Layout {
     int screenW = 0;
     int screenH = 0;
-    int crystalX = 0;
-    int crystalY = 0;
-    int panelY0 = 0;      // absolute y where the HUD panel (below the crystal) starts
+    int panelY0 = 0;      // absolute y where the stats panel (below the raycast viewport) starts
     int panelH = 0;
-    int rowY0 = 0;        // absolute y of the first generator row
-    int rowHeight = 0;
-    int breakthroughY = 0;  // absolute y of the breakthrough button
-    int enterRealmY = 0;    // absolute y of the "Enter Secret Realm" button
-    int brightnessY = 0;    // absolute y of the brightness settings row
-    int volumeY = 0;        // absolute y of the volume settings row
+    int breakthroughY = 0;
+    int playerHpY = 0;
+    int enemyHpY = 0;
+    int routeY = 0;
+    int brightnessY = 0;
+    int volumeY = 0;
 };
 Layout gLayout;
 
 void computeLayout(int screenW, int screenH) {
     gLayout.screenW = screenW;
     gLayout.screenH = screenH;
-    gLayout.crystalX = (screenW - kRenderSize) / 2;
-    gLayout.crystalY = kHeaderHeight + kCrystalTopGap;
-    gLayout.panelY0 = gLayout.crystalY + kRenderSize + kCrystalBottomGap;
+    gLayout.panelY0 = raycastViewportBottom(screenH);
     gLayout.panelH = screenH - gLayout.panelY0;
 
-    int afterQi = kPanelTopPad + kQiReadoutHeight + kSectionGap; // panel-local y where rows start
-    int reservedBottom = kSectionGap + kBreakthroughHeight + kSectionGap + kEnterRealmHeight +
-                          kSectionGap + kSettingsRowHeight + kSectionGap + kSettingsRowHeight +
-                          kPanelBottomPad;
-    int rowsArea = gLayout.panelH - afterQi - reservedBottom;
-    int minRowsArea = NUM_GENERATORS * kRowMinHeight;
-    if (rowsArea < minRowsArea) rowsArea = minRowsArea;
-
-    gLayout.rowHeight = rowsArea / NUM_GENERATORS;
-    gLayout.rowY0 = gLayout.panelY0 + afterQi;
-    gLayout.breakthroughY = gLayout.rowY0 + gLayout.rowHeight * NUM_GENERATORS + kSectionGap;
-    gLayout.enterRealmY = gLayout.breakthroughY + kBreakthroughHeight + kSectionGap;
-    gLayout.brightnessY = gLayout.enterRealmY + kEnterRealmHeight + kSectionGap;
-    gLayout.volumeY = gLayout.brightnessY + kSettingsRowHeight + kSectionGap;
+    int y = gLayout.panelY0 + kPanelTopPad;
+    gLayout.breakthroughY = y; y += kBreakthroughBarHeight + kSectionGap;
+    gLayout.playerHpY = y; y += kHpBarHeight + kSectionGap;
+    gLayout.enemyHpY = y; y += kHpBarHeight + kSectionGap;
+    gLayout.routeY = y; y += kRouteBarHeight + kSectionGap;
+    gLayout.brightnessY = y; y += kSettingsRowHeight + kSectionGap;
+    gLayout.volumeY = y;
 }
 
-Rect qiReadoutRect() {
-    return Rect{0, gLayout.panelY0 + kPanelTopPad, gLayout.screenW, kQiReadoutHeight};
-}
-
-Rect generatorRowRect(int genIndex) {
-    return Rect{0, gLayout.rowY0 + genIndex * gLayout.rowHeight, gLayout.screenW, gLayout.rowHeight - 4};
-}
-
-Rect breakthroughRect() {
-    return Rect{0, gLayout.breakthroughY, gLayout.screenW, kBreakthroughHeight};
-}
-
-Rect enterSecretRealmRect() {
-    return Rect{0, gLayout.enterRealmY, gLayout.screenW, kEnterRealmHeight};
-}
-
-Rect brightnessRowRect() {
-    return Rect{0, gLayout.brightnessY, gLayout.screenW, kSettingsRowHeight};
-}
-
-Rect volumeRowRect() {
-    return Rect{0, gLayout.volumeY, gLayout.screenW, kSettingsRowHeight};
-}
+Rect breakthroughRect() { return Rect{0, gLayout.breakthroughY, gLayout.screenW, kBreakthroughBarHeight}; }
+Rect playerHpRect() { return Rect{0, gLayout.playerHpY, gLayout.screenW, kHpBarHeight}; }
+Rect enemyHpRect() { return Rect{0, gLayout.enemyHpY, gLayout.screenW, kHpBarHeight}; }
+Rect routeRect() { return Rect{0, gLayout.routeY, gLayout.screenW, kRouteBarHeight}; }
+Rect brightnessRowRect() { return Rect{0, gLayout.brightnessY, gLayout.screenW, kSettingsRowHeight}; }
+Rect volumeRowRect() { return Rect{0, gLayout.volumeY, gLayout.screenW, kSettingsRowHeight}; }
 
 // Each settings row is one tappable strip split into a left ("-") and right ("+") half,
-// rather than four separate button rects, to keep the added panel footprint compact.
+// rather than four separate button rects, to keep the panel footprint compact.
 Rect leftHalf(const Rect& r) { return Rect{r.x, r.y, r.w / 2, r.h}; }
 Rect rightHalf(const Rect& r) { return Rect{r.x + r.w / 2, r.y, r.w - r.w / 2, r.h}; }
 
-// Fixed strip at the bottom of the screen, independent of gLayout (which describes the idle
-// view's panel) - see kReturnButtonHeight's comment in ui.h for why this stays a raw screen-
-// relative rect shared with trial_view.cpp rather than something computeLayout() tracks.
-Rect returnButtonRect() {
-    return Rect{0, gLayout.screenH - kReturnButtonHeight, gLayout.screenW, kReturnButtonHeight};
-}
-
 M5Canvas* gHeaderCanvas = nullptr;
-M5Canvas* gHudCanvas = nullptr;
+M5Canvas* gPanelCanvas = nullptr;
 
 // Picks the largest text size in [1, startSize] at which `text` fits within
 // maxWidth (measured with textWidth(), not assumed), sets it on `canvas`, and
@@ -147,23 +108,25 @@ void drawRightAligned(M5Canvas& canvas, const char* text, int xRight, int yCente
     canvas.print(text);
 }
 
-} // namespace
-
-void initHud(M5GFX& display) {
-    if (gHudCanvas) return; // already initialized; safe to call more than once
-    computeLayout(display.width(), display.height());
-
-    gHeaderCanvas = new M5Canvas(&display);
-    gHeaderCanvas->createSprite(gLayout.screenW, kHeaderHeight);
-
-    gHudCanvas = new M5Canvas(&display);
-    gHudCanvas->createSprite(gLayout.screenW, gLayout.panelH);
+// Draws a two-tone progress bar (filled portion in `fillColor`, unfilled in dark grey) with a
+// left-aligned label overlaid in transparent white text - a solid fg/bg color pair would only
+// match one of the bar's two background colors, so this uses the single-argument
+// setTextColor() (transparent background, only glyph pixels drawn) instead. `fraction` is
+// clamped to [0,1] so a caller passing a raw ratio can't overflow the bar.
+void drawBar(M5Canvas& canvas, const Rect& r, float fraction, uint16_t fillColor, const char* label) {
+    if (fraction < 0.0f) fraction = 0.0f;
+    if (fraction > 1.0f) fraction = 1.0f;
+    int ly = r.y - gLayout.panelY0;
+    canvas.fillRect(0, ly, r.w, r.h, TFT_DARKGREY);
+    int fillW = static_cast<int>(r.w * fraction);
+    if (fillW > 0) canvas.fillRect(0, ly, fillW, r.h, fillColor);
+    canvas.setTextSize(2);
+    canvas.setTextColor(TFT_WHITE);
+    canvas.setCursor(12, ly + (r.h - canvas.fontHeight()) / 2);
+    canvas.print(label);
 }
 
 void drawHeader(M5GFX& display, const GameState& state) {
-    if (!gHudCanvas) initHud(display);
-
-    // ---------------- Header bar: realm/Qi-per-sec (left), battery (right) ----------------
     M5Canvas& hdr = *gHeaderCanvas;
     constexpr uint16_t kHeaderBg = 0x18E3; // dark navy-grey, distinct from the panel's black
     hdr.fillScreen(kHeaderBg);
@@ -188,7 +151,7 @@ void drawHeader(M5GFX& display, const GameState& state) {
         snprintf(rightBuf, sizeof(rightBuf), "%ld%%%s", static_cast<long>(batteryLevel), charging ? "+" : "");
     }
 
-    int rightMaxWidth = gLayout.screenW / 4; // battery-only now; clock removed, reclaim the space for the left side
+    int rightMaxWidth = gLayout.screenW / 4;
     int leftMaxWidth = gLayout.screenW - rightMaxWidth - 24;
     int headerCenterY = kHeaderHeight / 2;
 
@@ -198,109 +161,88 @@ void drawHeader(M5GFX& display, const GameState& state) {
     hdr.pushSprite(0, 0);
 }
 
-void drawHud(M5GFX& display, const GameState& state, uint8_t brightness, uint8_t volume) {
-    if (!gHudCanvas) initHud(display);
+} // namespace
+
+void initHud(M5GFX& display) {
+    if (gPanelCanvas) return; // already initialized; safe to call more than once
+    computeLayout(display.width(), display.height());
+
+    gHeaderCanvas = new M5Canvas(&display);
+    gHeaderCanvas->createSprite(gLayout.screenW, kHeaderHeight);
+
+    gPanelCanvas = new M5Canvas(&display);
+    gPanelCanvas->createSprite(gLayout.screenW, gLayout.panelH);
+}
+
+void drawHud(M5GFX& display, const GameState& state, const TrialState& trial,
+             uint8_t brightness, uint8_t volume) {
+    if (!gPanelCanvas) initHud(display);
     drawHeader(display, state);
 
-    // ---------------- Body panel: Qi total, generator rows, breakthrough button ----------------
-    M5Canvas& hud = *gHudCanvas;
-    hud.fillScreen(TFT_BLACK);
+    M5Canvas& panel = *gPanelCanvas;
+    panel.fillScreen(TFT_BLACK);
 
-    Rect qiR = qiReadoutRect();
-    int qiLy = qiR.y - gLayout.panelY0;
-    char qiValue[24];
-    formatQi(state.qi, qiValue, sizeof(qiValue));
-    char qiLine[32];
-    snprintf(qiLine, sizeof(qiLine), "Qi: %s", qiValue);
-    drawLeftAligned(hud, qiLine, 12, qiLy + kQiReadoutHeight / 2, qiR.w - 24, 4, TFT_WHITE, TFT_BLACK);
-
-    for (int i = 0; i < NUM_GENERATORS; ++i) {
-        Rect r = generatorRowRect(i);
-        int ly = r.y - gLayout.panelY0;
-        bool unlocked = isGeneratorUnlocked(state, i);
-        uint16_t bg = unlocked ? TFT_DARKGREY : TFT_BLACK;
-        hud.fillRect(0, ly, r.w, r.h, bg);
-
-        char line[64];
-        if (unlocked) {
-            char costBuf[24];
-            formatQi(costForGenerator(i, state.generatorCounts[i]), costBuf, sizeof(costBuf));
-            snprintf(line, sizeof(line), "%s x%d - %s", GENERATORS[i].name, state.generatorCounts[i], costBuf);
-        } else {
-            snprintf(line, sizeof(line), "%s (locked)", GENERATORS[i].name);
-        }
-        drawLeftAligned(hud, line, 12, ly + r.h / 2, r.w - 24, 2, TFT_WHITE, bg);
-    }
-
-    Rect bt = breakthroughRect();
-    int btly = bt.y - gLayout.panelY0;
-    bool canBt = canBreakthrough(state);
-    uint16_t btBg = canBt ? TFT_ORANGE : TFT_DARKGREY;
-    hud.fillRect(0, btly, bt.w, bt.h, btBg);
-
-    char btLine[40];
+    float breakthroughFraction = 1.0f;
+    char btLabel[40];
     if (state.realmIndex < NUM_REALMS - 1) {
-        char threshBuf[24];
-        formatQi(REALM_QI_THRESHOLD[state.realmIndex + 1], threshBuf, sizeof(threshBuf));
-        snprintf(btLine, sizeof(btLine), "Attempt Breakthrough (%s Qi)", threshBuf);
+        breakthroughFraction =
+            static_cast<float>(state.qi / REALM_QI_THRESHOLD[state.realmIndex + 1]);
+        snprintf(btLabel, sizeof(btLabel), "Breakthrough %d%%",
+                 static_cast<int>(breakthroughFraction * 100));
     } else {
-        snprintf(btLine, sizeof(btLine), "Max Realm Reached");
+        snprintf(btLabel, sizeof(btLabel), "Max Realm Reached");
     }
-    uint16_t btFg = canBt ? TFT_BLACK : TFT_WHITE; // black-on-orange reads better than white-on-orange
-    drawLeftAligned(hud, btLine, 12, btly + bt.h / 2, bt.w - 24, 2, btFg, btBg);
+    drawBar(panel, breakthroughRect(), breakthroughFraction, TFT_ORANGE, btLabel);
 
-    Rect er = enterSecretRealmRect();
-    int erly = er.y - gLayout.panelY0;
-    bool realmUnlocked = state.realmIndex >= kSecretRealmUnlockRealmIndex;
-    uint16_t erBg = realmUnlocked ? TFT_PURPLE : TFT_DARKGREY;
-    hud.fillRect(0, erly, er.w, er.h, erBg);
+    float playerFraction = trial.player.maxHp > 0
+        ? static_cast<float>(trial.player.hp) / static_cast<float>(trial.player.maxHp)
+        : 0.0f;
+    char playerLabel[32];
+    snprintf(playerLabel, sizeof(playerLabel), "Player HP %d/%d", trial.player.hp, trial.player.maxHp);
+    drawBar(panel, playerHpRect(), playerFraction, TFT_GREEN, playerLabel);
 
-    char erLine[48];
-    if (realmUnlocked) {
-        snprintf(erLine, sizeof(erLine), "Enter Secret Realm");
+    bool fighting = (trial.phase == TrialPhase::Fighting);
+    float enemyFraction = (fighting && trial.enemy.maxHp > 0)
+        ? static_cast<float>(trial.enemy.hp) / static_cast<float>(trial.enemy.maxHp)
+        : 0.0f;
+    char enemyLabel[32];
+    if (fighting) {
+        snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP %d/%d", trial.enemy.hp, trial.enemy.maxHp);
     } else {
-        snprintf(erLine, sizeof(erLine), "Secret Realm (%s required)", REALM_NAMES[kSecretRealmUnlockRealmIndex]);
+        snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP --");
     }
-    drawLeftAligned(hud, erLine, 12, erly + er.h / 2, er.w - 24, 2, TFT_WHITE, erBg);
+    drawBar(panel, enemyHpRect(), enemyFraction, TFT_RED, enemyLabel);
 
-    // Settings rows: each is one strip split into a "-" left half and "+" right half (see
-    // leftHalf()/rightHalf()), rather than four separate buttons, to stay compact.
+    float routeFraction;
+    char routeLabel[32];
+    if (trial.phase == TrialPhase::Cleared) {
+        routeFraction = 1.0f;
+        snprintf(routeLabel, sizeof(routeLabel), "Cleared!");
+    } else {
+        int lastIndex = trial.map.route.size() > 1 ? static_cast<int>(trial.map.route.size()) - 1 : 1;
+        routeFraction = static_cast<float>(trial.currentWaypointIndex) / static_cast<float>(lastIndex);
+        snprintf(routeLabel, sizeof(routeLabel), "Route %d/%d", trial.currentWaypointIndex, lastIndex);
+    }
+    drawBar(panel, routeRect(), routeFraction, TFT_CYAN, routeLabel);
+
     Rect brRow = brightnessRowRect();
     int brly = brRow.y - gLayout.panelY0;
-    hud.fillRect(0, brly, brRow.w, brRow.h, TFT_DARKGREY);
+    panel.fillRect(0, brly, brRow.w, brRow.h, TFT_DARKGREY);
     char brLine[32];
     snprintf(brLine, sizeof(brLine), "-  Brightness %d%%  +", (brightness * 100) / 255);
-    drawLeftAligned(hud, brLine, 12, brly + brRow.h / 2, brRow.w - 24, 2, TFT_WHITE, TFT_DARKGREY);
+    drawLeftAligned(panel, brLine, 12, brly + brRow.h / 2, brRow.w - 24, 2, TFT_WHITE, TFT_DARKGREY);
 
     Rect volRow = volumeRowRect();
     int voly = volRow.y - gLayout.panelY0;
-    hud.fillRect(0, voly, volRow.w, volRow.h, TFT_DARKGREY);
+    panel.fillRect(0, voly, volRow.w, volRow.h, TFT_DARKGREY);
     char volLine[32];
     snprintf(volLine, sizeof(volLine), "-  Volume %d%%  +", (volume * 100) / 255);
-    drawLeftAligned(hud, volLine, 12, voly + volRow.h / 2, volRow.w - 24, 2, TFT_WHITE, TFT_DARKGREY);
+    drawLeftAligned(panel, volLine, 12, voly + volRow.h / 2, volRow.w - 24, 2, TFT_WHITE, TFT_DARKGREY);
 
-    hud.pushSprite(0, gLayout.panelY0);
+    panel.pushSprite(0, gLayout.panelY0);
 }
 
-int hitTestHud(int touchX, int touchY, bool inTrialMode) {
-    if (inTrialMode) {
-        if (rectContains(returnButtonRect(), touchX, touchY)) {
-            return HUD_BUTTON_RETURN_TO_CULTIVATION;
-        }
-        return HUD_BUTTON_NONE;
-    }
-
-    for (int i = 0; i < NUM_GENERATORS; ++i) {
-        if (rectContains(generatorRowRect(i), touchX, touchY)) {
-            return HUD_BUTTON_GENERATOR_BASE + i;
-        }
-    }
-    if (rectContains(breakthroughRect(), touchX, touchY)) {
-        return HUD_BUTTON_BREAKTHROUGH;
-    }
-    if (rectContains(enterSecretRealmRect(), touchX, touchY)) {
-        return HUD_BUTTON_ENTER_SECRET_REALM;
-    }
+int hitTestHud(int touchX, int touchY) {
     Rect brRow = brightnessRowRect();
     if (rectContains(leftHalf(brRow), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_DOWN;
     if (rectContains(rightHalf(brRow), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_UP;
