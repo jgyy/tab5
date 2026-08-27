@@ -840,6 +840,7 @@ struct Framebuffer {
     }
 
     RGB getPixel(int x, int y) const {
+        if (x < 0 || x >= width || y < 0 || y >= height) return RGB{0, 0, 0};
         return pixels[static_cast<size_t>(y) * width + x];
     }
 };
