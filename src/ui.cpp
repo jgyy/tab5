@@ -35,6 +35,7 @@ constexpr int kPanelBottomPad = 16;
 constexpr int kSectionGap = 8;
 constexpr int kQiReadoutHeight = 70;
 constexpr int kBreakthroughHeight = 72;
+constexpr int kEnterRealmHeight = 64;
 constexpr int kRowMinHeight = 40; // floor so rows never collapse to nothing on a tiny display
 
 struct Layout {
@@ -46,7 +47,8 @@ struct Layout {
     int panelH = 0;
     int rowY0 = 0;        // absolute y of the first generator row
     int rowHeight = 0;
-    int breakthroughY = 0; // absolute y of the breakthrough button
+    int breakthroughY = 0;  // absolute y of the breakthrough button
+    int enterRealmY = 0;    // absolute y of the "Enter Secret Realm" button
 };
 Layout gLayout;
 
@@ -59,7 +61,7 @@ void computeLayout(int screenW, int screenH) {
     gLayout.panelH = screenH - gLayout.panelY0;
 
     int afterQi = kPanelTopPad + kQiReadoutHeight + kSectionGap; // panel-local y where rows start
-    int reservedBottom = kSectionGap + kBreakthroughHeight + kPanelBottomPad;
+    int reservedBottom = kSectionGap + kBreakthroughHeight + kSectionGap + kEnterRealmHeight + kPanelBottomPad;
     int rowsArea = gLayout.panelH - afterQi - reservedBottom;
     int minRowsArea = NUM_GENERATORS * kRowMinHeight;
     if (rowsArea < minRowsArea) rowsArea = minRowsArea;
@@ -67,6 +69,7 @@ void computeLayout(int screenW, int screenH) {
     gLayout.rowHeight = rowsArea / NUM_GENERATORS;
     gLayout.rowY0 = gLayout.panelY0 + afterQi;
     gLayout.breakthroughY = gLayout.rowY0 + gLayout.rowHeight * NUM_GENERATORS + kSectionGap;
+    gLayout.enterRealmY = gLayout.breakthroughY + kBreakthroughHeight + kSectionGap;
 }
 
 Rect qiReadoutRect() {
@@ -79,6 +82,17 @@ Rect generatorRowRect(int genIndex) {
 
 Rect breakthroughRect() {
     return Rect{0, gLayout.breakthroughY, gLayout.screenW, kBreakthroughHeight};
+}
+
+Rect enterSecretRealmRect() {
+    return Rect{0, gLayout.enterRealmY, gLayout.screenW, kEnterRealmHeight};
+}
+
+// Fixed strip at the bottom of the screen, independent of gLayout (which describes the idle
+// view's panel) - see kReturnButtonHeight's comment in ui.h for why this stays a raw screen-
+// relative rect shared with trial_view.cpp rather than something computeLayout() tracks.
+Rect returnButtonRect() {
+    return Rect{0, gLayout.screenH - kReturnButtonHeight, gLayout.screenW, kReturnButtonHeight};
 }
 
 M5Canvas* gHeaderCanvas = nullptr;
@@ -126,7 +140,7 @@ void initHud(M5GFX& display) {
     gHudCanvas->createSprite(gLayout.screenW, gLayout.panelH);
 }
 
-void drawHud(M5GFX& display, const GameState& state) {
+void drawHeader(M5GFX& display, const GameState& state) {
     if (!gHudCanvas) initHud(display);
 
     // ---------------- Header bar: realm/Qi-per-sec (left), battery (right) ----------------
@@ -162,6 +176,11 @@ void drawHud(M5GFX& display, const GameState& state) {
     drawRightAligned(hdr, rightBuf, gLayout.screenW - 12, headerCenterY, rightMaxWidth, 2, TFT_WHITE, kHeaderBg);
 
     hdr.pushSprite(0, 0);
+}
+
+void drawHud(M5GFX& display, const GameState& state) {
+    if (!gHudCanvas) initHud(display);
+    drawHeader(display, state);
 
     // ---------------- Body panel: Qi total, generator rows, breakthrough button ----------------
     M5Canvas& hud = *gHudCanvas;
@@ -210,10 +229,31 @@ void drawHud(M5GFX& display, const GameState& state) {
     uint16_t btFg = canBt ? TFT_BLACK : TFT_WHITE; // black-on-orange reads better than white-on-orange
     drawLeftAligned(hud, btLine, 12, btly + bt.h / 2, bt.w - 24, 2, btFg, btBg);
 
+    Rect er = enterSecretRealmRect();
+    int erly = er.y - gLayout.panelY0;
+    bool realmUnlocked = state.realmIndex >= kSecretRealmUnlockRealmIndex;
+    uint16_t erBg = realmUnlocked ? TFT_PURPLE : TFT_DARKGREY;
+    hud.fillRect(0, erly, er.w, er.h, erBg);
+
+    char erLine[48];
+    if (realmUnlocked) {
+        snprintf(erLine, sizeof(erLine), "Enter Secret Realm");
+    } else {
+        snprintf(erLine, sizeof(erLine), "Secret Realm (%s required)", REALM_NAMES[kSecretRealmUnlockRealmIndex]);
+    }
+    drawLeftAligned(hud, erLine, 12, erly + er.h / 2, er.w - 24, 2, TFT_WHITE, erBg);
+
     hud.pushSprite(0, gLayout.panelY0);
 }
 
-int hitTestHud(int touchX, int touchY) {
+int hitTestHud(int touchX, int touchY, bool inTrialMode) {
+    if (inTrialMode) {
+        if (rectContains(returnButtonRect(), touchX, touchY)) {
+            return HUD_BUTTON_RETURN_TO_CULTIVATION;
+        }
+        return HUD_BUTTON_NONE;
+    }
+
     for (int i = 0; i < NUM_GENERATORS; ++i) {
         if (rectContains(generatorRowRect(i), touchX, touchY)) {
             return HUD_BUTTON_GENERATOR_BASE + i;
@@ -221,6 +261,9 @@ int hitTestHud(int touchX, int touchY) {
     }
     if (rectContains(breakthroughRect(), touchX, touchY)) {
         return HUD_BUTTON_BREAKTHROUGH;
+    }
+    if (rectContains(enterSecretRealmRect(), touchX, touchY)) {
+        return HUD_BUTTON_ENTER_SECRET_REALM;
     }
     return HUD_BUTTON_NONE;
 }

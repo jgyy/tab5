@@ -154,12 +154,26 @@ void renderTrialView(M5GFX& display, const TrialState& state) {
     }
 
     // Scaled push: displays the small internal buffer stretched to cover most of the screen,
-    // centered horizontally and vertically within the space below the header bar. Default
-    // sprite pivot is its own center, so (centerX, centerY) here is where that center lands
-    // on the physical display.
+    // centered horizontally and vertically within the space between the header bar and the
+    // reserved "Return to Cultivation" strip at the bottom. Default sprite pivot is its own
+    // center, so (centerX, centerY) here is where that center lands on the physical display.
+    float availableTop = kHeaderHeight;
+    float availableBottom = display.height() - kReturnButtonHeight;
     float centerX = display.width() / 2.0f;
-    float centerY = kHeaderHeight + (display.height() - kHeaderHeight) / 2.0f;
+    float centerY = availableTop + (availableBottom - availableTop) / 2.0f;
     gTrialCanvas->pushRotateZoom(centerX, centerY, 0.0f, kTrialZoom, kTrialZoom);
+
+    // "Return to Cultivation" button: drawn directly on `display` (not the trial canvas)
+    // since it lives in the fixed bottom strip outside the scaled raycast view. hit-tested by
+    // ui.cpp's hitTestHud(..., /*inTrialMode=*/true) against the same kReturnButtonHeight rect.
+    int returnY = display.height() - kReturnButtonHeight;
+    display.fillRect(0, returnY, display.width(), kReturnButtonHeight, TFT_DARKGREY);
+    display.setTextSize(3);
+    display.setTextColor(TFT_WHITE, TFT_DARKGREY);
+    const char* label = "Return to Cultivation";
+    int textW = display.textWidth(label);
+    display.setCursor((display.width() - textW) / 2, returnY + (kReturnButtonHeight - display.fontHeight()) / 2);
+    display.print(label);
 }
 
 void playAttackSfx() {
