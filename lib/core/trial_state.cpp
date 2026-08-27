@@ -1,16 +1,36 @@
 #include "trial_state.h"
 #include <cmath>
 
+namespace {
+constexpr float kPi = 3.14159265f;
+constexpr float kTwoPi = 6.28318531f;
+
+// Signed difference `to - from`, wrapped to (-pi, pi] so a heading always turns the short way
+// around the +-pi wrap boundary instead of spinning the long way around. This maze only ever
+// needs 90-degree turns, but the math is general.
+float shortestAngleDiff(float from, float to) {
+    float diff = std::fmod(to - from, kTwoPi);
+    if (diff > kPi) diff -= kTwoPi;
+    if (diff < -kPi) diff += kTwoPi;
+    return diff;
+}
+} // namespace
+
 TrialState startTrial(const TrialMap& map, int realmIndex) {
     TrialState s;
     s.map = map;
-    s.realmIndexAtStart = realmIndex;
     s.posX = map.route[0].x;
     s.posY = map.route[0].y;
     // Start already standing at route[0], so head toward route[1] immediately rather than
     // toward route[0] itself - targeting index 0 would make the very first tick see "already
     // arrived" (distance ~0) and skip movement for a step instead of heading anywhere.
     s.currentWaypointIndex = (map.route.size() > 1) ? 1 : 0;
+    // Face the first waypoint immediately instead of leaving facingRadians at its 0.0f default -
+    // that default only happens to already match this specific map's first segment (due east),
+    // which isn't something a differently-shaped map could rely on.
+    if (map.route.size() > 1) {
+        s.facingRadians = std::atan2(map.route[1].y - s.posY, map.route[1].x - s.posX);
+    }
     s.phase = TrialPhase::Traveling;
     s.player = makePlayerCombatant(realmIndex);
     s.currentEnemyIndex = -1;
@@ -19,10 +39,9 @@ TrialState startTrial(const TrialMap& map, int realmIndex) {
     return s;
 }
 
-void restartTrial(TrialState& state) {
+void restartTrial(TrialState& state, int currentRealmIndex) {
     TrialMap map = state.map; // preserve across reassignment below
-    int realmIndex = state.realmIndexAtStart;
-    state = startTrial(map, realmIndex);
+    state = startTrial(map, currentRealmIndex);
 }
 
 namespace {
@@ -47,7 +66,7 @@ bool allEnemiesDefeated(const TrialState& state) {
 }
 } // namespace
 
-void tickTrial(TrialState& state, double dtSeconds, double proposedReward) {
+void tickTrial(TrialState& state, double dtSeconds, double proposedReward, int currentRealmIndex) {
     if (state.phase == TrialPhase::Cleared) return;
 
     if (state.phase == TrialPhase::Traveling) {
@@ -77,7 +96,18 @@ void tickTrial(TrialState& state, double dtSeconds, double proposedReward) {
             return;
         }
 
-        state.facingRadians = std::atan2(dy, dx);
+        // Ease facingRadians toward the travel direction at a fixed turn rate instead of
+        // snapping instantly to it in one tick - an instant same-tick jump reads as a hard cut
+        // once rendered at any real frame rate, not as a turn. Movement below is unaffected:
+        // position always steps straight toward the target regardless of how far the camera
+        // has turned to face it yet.
+        float desiredFacing = std::atan2(dy, dx);
+        float diff = shortestAngleDiff(state.facingRadians, desiredFacing);
+        float maxStep = kTurnRateRadiansPerSec * static_cast<float>(dtSeconds);
+        if (diff > maxStep) diff = maxStep;
+        if (diff < -maxStep) diff = -maxStep;
+        state.facingRadians += diff;
+
         float step = kTravelSpeed * static_cast<float>(dtSeconds);
         if (step > dist) step = dist;
         state.posX += (dx / dist) * step;
@@ -92,6 +122,6 @@ void tickTrial(TrialState& state, double dtSeconds, double proposedReward) {
         state.currentEnemyIndex = -1;
         state.phase = TrialPhase::Traveling;
     } else if (isDefeated(state.player)) {
-        restartTrial(state);
+        restartTrial(state, currentRealmIndex);
     }
 }
