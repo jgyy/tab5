@@ -86,6 +86,21 @@ void setup() {
                                                     rateAtSave, 24 * 3600);
         save.qi += offlineQi;
         Serial.printf("[OFFLINE] Gained %.2f Qi while away\n", offlineQi);
+
+        // Design spec (Persistence & Offline Earnings): show a "While you cultivated in
+        // seclusion..." screen before entering the main view. Only for a meaningfully
+        // nonzero amount — a returning player who was away for only a few seconds (or a
+        // fresh device with no prior rate) has nothing worth interrupting boot to report.
+        if (offlineQi >= 0.1) {
+            char qiBuf[24];
+            formatQi(offlineQi, qiBuf, sizeof(qiBuf));
+            M5.Display.fillScreen(TFT_BLACK);
+            M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+            M5.Display.setTextSize(2);
+            M5.Display.setCursor(20, 20);
+            M5.Display.printf("While you cultivated in seclusion,\nyou gained %s Qi", qiBuf);
+            delay(2000);
+        }
     } else {
         Serial.println("[OFFLINE] First-ever boot, no offline bonus");
     }

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <M5Unified.h>
 #include "economy.h"
 #include "hittest.h"
@@ -34,3 +35,9 @@ void initHud(M5GFX& display);
 // partial-redraw flicker.
 void drawHud(M5GFX& display, const GameState& state);
 int hitTestHud(int touchX, int touchY);
+
+// Compact K/M/B display formatting for Qi-scale numbers (e.g. "2.2M" instead of
+// "2200000"); exposed so main.cpp's welcome-back screen can format consistently
+// with the rest of the HUD. `outLen` must cover the worst case (sign + digits +
+// suffix + NUL); 24 bytes is comfortably enough for any value this game reaches.
+void formatQi(double v, char* out, size_t outLen);

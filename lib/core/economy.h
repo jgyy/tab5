@@ -17,7 +17,12 @@ extern const double REALM_QI_THRESHOLD[NUM_REALMS]; // Qi needed to break INTO r
 
 struct GameState {
     double qi = 0.0;
-    int generatorCounts[NUM_GENERATORS] = {0, 0, 0, 0, 0, 0};
+    // A fresh game starts owning 1 unit of generator 0 (Breathing Technique), which the
+    // spec calls "available from the start" — without this, qiPerSecond() is 0 forever
+    // and a truly fresh device can never afford its first purchase. SaveData's default
+    // (save.h) must agree with this, since the real boot path goes through SaveData, not
+    // this struct directly.
+    int generatorCounts[NUM_GENERATORS] = {1, 0, 0, 0, 0, 0};
     int realmIndex = 0;
 };
 

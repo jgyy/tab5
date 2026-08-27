@@ -3,6 +3,25 @@
 #include <cstring>
 #include <cmath>
 
+// Compact display formatting for Qi-scale numbers, which grow into the tens of
+// millions (REALM_QI_THRESHOLD tops out at 27,000,000) — a raw "%.0f" would
+// overflow a generator row or the header at any reasonable text size. Declared in
+// ui.h (not anonymous-namespace-local) so main.cpp's welcome-back screen can reuse
+// it for the same K/M/B formatting the rest of the HUD uses.
+void formatQi(double v, char* out, size_t outLen) {
+    double av = v < 0 ? -v : v;
+    const char* sign = v < 0 ? "-" : "";
+    if (av < 1000.0) {
+        snprintf(out, outLen, "%s%.1f", sign, av);
+    } else if (av < 1e6) {
+        snprintf(out, outLen, "%s%.1fK", sign, av / 1e3);
+    } else if (av < 1e9) {
+        snprintf(out, outLen, "%s%.1fM", sign, av / 1e6);
+    } else {
+        snprintf(out, outLen, "%s%.1fB", sign, av / 1e9);
+    }
+}
+
 namespace {
 
 // ---- Layout tuning ----
@@ -64,23 +83,6 @@ Rect breakthroughRect() {
 
 M5Canvas* gHeaderCanvas = nullptr;
 M5Canvas* gHudCanvas = nullptr;
-
-// Compact display formatting for Qi-scale numbers, which grow into the tens of
-// millions (REALM_QI_THRESHOLD tops out at 27,000,000) — a raw "%.0f" would
-// overflow a generator row or the header at any reasonable text size.
-void formatQi(double v, char* out, size_t outLen) {
-    double av = v < 0 ? -v : v;
-    const char* sign = v < 0 ? "-" : "";
-    if (av < 1000.0) {
-        snprintf(out, outLen, "%s%.1f", sign, av);
-    } else if (av < 1e6) {
-        snprintf(out, outLen, "%s%.1fK", sign, av / 1e3);
-    } else if (av < 1e9) {
-        snprintf(out, outLen, "%s%.1fM", sign, av / 1e6);
-    } else {
-        snprintf(out, outLen, "%s%.1fB", sign, av / 1e9);
-    }
-}
 
 // Picks the largest text size in [1, startSize] at which `text` fits within
 // maxWidth (measured with textWidth(), not assumed), sets it on `canvas`, and

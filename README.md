@@ -12,16 +12,17 @@ Nascent Soul, Soul Transformation, Void Refinement — each breakthrough spendin
 next realm's Qi threshold. The centerpiece is a procedurally-shaded, rotating low-poly
 crystal (a plain 20-face icosahedron with per-realm vertex displacement and color
 palette) rendered with a custom software 3D rasterizer, since the ESP32-P4 has no GPU.
-It draws into a 240x240 offscreen buffer at roughly 27-28 FPS on real hardware — Task 8
+It draws into a 240x240 offscreen buffer at roughly 27-28 FPS on real hardware (measured
+on a debug build; a release build would likely be faster, not yet benchmarked) — Task 8
 found no FPS headroom to justify subdividing the mesh further.
 
 The game plays itself, idle-game style: generators are auto-bought and realm
 breakthroughs auto-triggered every 50ms tick (breakthrough is checked first, then one
 purchase attempt per generator in unlock order) as Qi allows. Manual tap-to-buy and
-tap-to-breakthrough buttons still work if you'd rather drive it by hand, but tapping is
-never required. Automated actions don't force an immediate save (to spare NVS flash
-write endurance from very frequent writes) — the existing 15-second periodic autosave
-covers them; manual taps still save immediately.
+tap-to-breakthrough are still wired up, but automation checks every 50ms, so in practice
+it wins the race before you can tap. Automated actions don't force an immediate save (to
+spare NVS flash write endurance from very frequent writes) — the existing 15-second
+periodic autosave covers them; manual taps still save immediately.
 
 The whole UI is a hand-rolled M5GFX HUD (no LVGL), composited into offscreen `M5Canvas`
 sprites and pushed to the display once per frame to avoid flicker. Despite the panel
@@ -63,7 +64,7 @@ python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200
 
 Game logic (3D math, procedural mesh growth, the software rasterizer, the idle-game
 economy, save serialization, offline-earnings math, HUD hit-testing) is hardware-agnostic
-C++ under `lib/core/`, unit-tested on the host machine — no device required. 46 test
+C++ under `lib/core/`, unit-tested on the host machine — no device required. 48 test
 cases across 8 suites, all passing:
 
 ```bash

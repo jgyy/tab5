@@ -86,6 +86,10 @@ void test_purchase_generator_requires_unlock() {
 
 void test_purchase_generator_requires_affordability() {
     GameState state;
+    // Explicit zero baseline: GameState's default now owns 1 unit of generator 0 (a
+    // fresh game starts with Breathing Technique), so this test sets the count itself
+    // rather than relying on the default to isolate the afford-check being tested.
+    state.generatorCounts[0] = 0;
     state.qi = 1.0;
     TEST_ASSERT_FALSE(purchaseGenerator(state, 0));
     TEST_ASSERT_EQUAL(0, state.generatorCounts[0]);
@@ -93,6 +97,8 @@ void test_purchase_generator_requires_affordability() {
 
 void test_purchase_generator_deducts_cost_and_increments_count() {
     GameState state;
+    // Explicit zero baseline; see comment above.
+    state.generatorCounts[0] = 0;
     state.qi = 1000.0;
     double costBefore = costForGenerator(0, 0);
     bool ok = purchaseGenerator(state, 0);

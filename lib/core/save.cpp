@@ -57,6 +57,11 @@ bool deserializeSave(const uint8_t* buffer, size_t bufferLen, SaveData& outData)
     if (fnv1aChecksum(buffer, sizeof(SaveData)) != storedChecksum) return false;
     if (candidate.magic != SAVE_MAGIC) return false;
     if (candidate.version != SAVE_VERSION) return false;
+    // Defensive: a checksum-valid but out-of-range realmIndex (corrupt-but-consistent
+    // data, or a future format mistake) would otherwise later index REALM_NAMES[]/
+    // REALM_QI_THRESHOLD[] out of bounds. Clamp rather than reject the whole save —
+    // mirrors the precedent set by growForRealm()'s clamping in mesh.cpp.
+    if (candidate.realmIndex >= NUM_REALMS) candidate.realmIndex = NUM_REALMS - 1;
 
     outData = candidate;
     return true;
