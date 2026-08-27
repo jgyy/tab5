@@ -226,12 +226,19 @@ progression without waiting in real time.
 
 ## Open Risks / Validation Needed
 
-- Exact offscreen canvas resolution vs. achieved FPS trade-off — unmeasured
-  until the "hello triangle" spike runs on real hardware.
+- ~~Exact offscreen canvas resolution vs. achieved FPS trade-off~~ **RESOLVED**
+  by the Task 8 rendering spike on real Tab5 hardware: at 320x320 the
+  per-pixel `M5Canvas::drawPixel` blit held only ~15-16 FPS; dropping to
+  **240x240 achieved a steady 27-28 FPS**, comfortably inside the 20-30 FPS
+  target. `kRenderSize = 240` is the locked baseline for Task 11.
 - Whether M5Unified exposes a pre-shutdown hook to force a final save, or
   whether periodic autosave is the only mechanism available.
-- Triangle budget ceiling (subdivision level 1 vs. 2) — decided by
-  profiling, not assumed.
+- ~~Triangle budget ceiling (subdivision level 1 vs. 2)~~ **RESOLVED** by the
+  same spike: at 240x240 there was no clear headroom above the 30 FPS
+  target (27-28 FPS measured), so the mesh was kept as the plain 20-face
+  `makeIcosahedron()` rather than `subdivide(makeIcosahedron())` (80 faces).
+  Subdivision remains an option to revisit only if a future profiling pass
+  on the full game loop (Task 11) shows spare frame budget.
 - Confirming M5Unified's RTC wrapper (`M5.Rtc` or equivalent) supports
   reading/writing epoch seconds as needed for the offline-earnings diff.
 
