@@ -4,6 +4,9 @@
 #include "framebuffer.h"
 #include "rasterizer.h"
 #include "nvs_store.h"
+#include "rtc_store.h"
+#include "offline_earnings.h"
+#include "economy.h"
 
 namespace {
 constexpr int kRenderSize = 240; // offscreen 3D viewport, square; tune based on measured FPS below
@@ -23,6 +26,23 @@ void setup() {
     Serial.begin(115200);
     delay(200);
     Serial.println("[BOOT] Rendering spike starting");
+
+    SaveData save = nvsLoadSave();
+    int64_t nowEpoch = readRtcEpochSeconds();
+
+    if (save.lastSaveEpochSeconds != 0) { // 0 means "no prior save" (see defaultSaveData())
+        GameState priorState = toGameState(save);
+        double rateAtSave = qiPerSecond(priorState);
+        double offlineQi = computeOfflineEarnings(nowEpoch, save.lastSaveEpochSeconds,
+                                                    rateAtSave, /*maxOfflineSeconds=*/24 * 3600);
+        save.qi += offlineQi;
+        Serial.printf("[OFFLINE] Away for up to 24h capped, gained %.2f Qi\n", offlineQi);
+    } else {
+        Serial.println("[OFFLINE] First-ever boot, no offline bonus");
+    }
+
+    save.lastSaveEpochSeconds = nowEpoch;
+    nvsWriteSave(save);
 
     M5.Display.fillScreen(TFT_BLACK);
 
