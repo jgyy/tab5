@@ -94,11 +94,29 @@ void test_directly_lit_face_is_brighter_than_grazing_face() {
     TEST_ASSERT_TRUE(litFb.getPixel(32, 32).r > grazingFb.getPixel(32, 32).r);
 }
 
+void test_get_pixel_out_of_range_returns_black_instead_of_crashing() {
+    Framebuffer fb(64, 64);
+    fb.clear(clearColor());
+
+    RGB negX = fb.getPixel(-1, 10);
+    RGB negY = fb.getPixel(10, -1);
+    RGB tooWideX = fb.getPixel(64, 10);
+    RGB tooTallY = fb.getPixel(10, 64);
+
+    TEST_ASSERT_EQUAL_UINT8(0, negX.r);
+    TEST_ASSERT_EQUAL_UINT8(0, negX.g);
+    TEST_ASSERT_EQUAL_UINT8(0, negX.b);
+    TEST_ASSERT_EQUAL_UINT8(0, negY.r);
+    TEST_ASSERT_EQUAL_UINT8(0, tooWideX.r);
+    TEST_ASSERT_EQUAL_UINT8(0, tooTallY.r);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_front_facing_triangle_draws_pixels);
     RUN_TEST(test_back_facing_triangle_is_culled);
     RUN_TEST(test_depth_sort_picks_nearer_face_within_one_mesh);
     RUN_TEST(test_directly_lit_face_is_brighter_than_grazing_face);
+    RUN_TEST(test_get_pixel_out_of_range_returns_black_instead_of_crashing);
     return UNITY_END();
 }
