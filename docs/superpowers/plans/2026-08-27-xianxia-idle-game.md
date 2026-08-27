@@ -1783,13 +1783,23 @@ Add this right after `Serial.begin(115200); delay(200);` (before the rendering s
 
 ```cpp
     {
+        // Read whatever is already in NVS BEFORE writing anything, so a later boot
+        // can compare against what THIS boot is about to write. Writing first and
+        // reading back in the same boot (as an earlier version of this diagnostic
+        // did) only proves write-then-read works within one boot — it can't tell
+        // "value survived a reboot" apart from "NVS silently resets every boot but
+        // trivially round-trips its own fresh write regardless." Reading first closes
+        // that gap: a genuinely-persisted prior value shows up here as non-default.
+        SaveData before = nvsLoadSave();
+        Serial.printf("[NVS] pre-write state: qi=%.1f realmIndex=%d\n", before.qi, before.realmIndex);
+
         SaveData probe = defaultSaveData();
-        probe.qi = 777.0;
-        probe.realmIndex = 2;
+        probe.qi = 555.0;
+        probe.realmIndex = 3;
         nvsWriteSave(probe);
 
         SaveData readBack = nvsLoadSave();
-        bool ok = (readBack.qi == 777.0) && (readBack.realmIndex == 2);
+        bool ok = (readBack.qi == 555.0) && (readBack.realmIndex == 3);
         Serial.println(ok ? "[NVS] round-trip PASS" : "[NVS] round-trip FAIL");
     }
 ```
@@ -1803,7 +1813,7 @@ python3 -m platformio run -e esp32p4_pioarduino -t upload --upload-port /dev/tty
 timeout 8 python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200 | tee /tmp/task9_nvs_log.txt
 grep -q "round-trip PASS" /tmp/task9_nvs_log.txt && echo "PASS" || echo "FAIL"
 ```
-Expected: `PASS`.
+Expected: `PASS`. This first boot's `pre-write state` line will show whatever was left in NVS before this task (defaults, or leftovers from earlier testing) — not meaningful yet on its own. What matters is what the *next* boot's `pre-write state` shows.
 
 - [ ] **Step 5: Verify persistence survives a power cycle**
 
@@ -1812,8 +1822,9 @@ Ask the user to power the device off (double-press the power button per the data
 ```bash
 timeout 8 python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200 | tee /tmp/task9_nvs_reboot_log.txt
 grep -q "round-trip PASS" /tmp/task9_nvs_reboot_log.txt && echo "PASS" || echo "FAIL"
+grep "pre-write state" /tmp/task9_nvs_reboot_log.txt
 ```
-Expected: still `PASS` — the probe write from before the reboot, followed by this boot's own write/read of the same values, both succeed, confirming NVS survives power cycles as expected.
+Expected: `PASS`, **and** the `pre-write state` line on this post-reboot boot must show `qi=555.0 realmIndex=3` — the exact value Step 4's boot wrote, read back *before* this boot overwrites it again. That specific value appearing here (not the struct's zero-value defaults, and not some other value) is the actual evidence that NVS survived the power cycle; the `round-trip PASS` line alone only re-proves write-then-read works within this new boot, same as before.
 
 - [ ] **Step 6: Remove the temporary diagnostic block and commit**
 
