@@ -32,12 +32,11 @@ constexpr uint32_t kHudRedrawIntervalMs = 300; // ~3Hz when idle
 // readRtcEpochSeconds() returns exactly 0 only for a genuinely never-seeded RTC chip
 // (see rtc_store.h). If that happens, seed it once with a reasonable recent-ish
 // timestamp so future elapsed-time deltas (offline earnings) work from this point
-// forward. Absolute accuracy doesn't matter here, only that it's nonzero.
-// Value: 2026-08-27 15:26:39 GMT+8 (Singapore, no DST) encoded as if it were UTC —
-// see rtc_store.cpp / ui.cpp's clock: readRtcEpochSeconds()/gmtime_r() treat the
-// RTC's stored fields as UTC with no further offset, so storing local-time-as-UTC
-// is what makes the header clock display the correct local wall time with no extra
-// timezone math anywhere.
+// forward. Absolute accuracy doesn't matter here, only that it's nonzero — this
+// value happens to be real GMT+8 wall-clock time (2026-08-27 15:26:39, captured
+// mid-Task-11 and used to reseed this device's already-seeded-but-inaccurate RTC),
+// but nothing in this codebase currently displays or otherwise depends on that
+// accuracy (there is no clock UI); only the elapsed difference between reads matters.
 constexpr int64_t kRtcFallbackEpochSeconds = 1787844399;
 
 GameState gState;
