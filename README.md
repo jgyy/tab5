@@ -84,6 +84,21 @@ actual compute cost. The full esp32p4_pioarduino build does compile and link suc
 (verified in this environment), but flashing and visually/FPS-testing it on the device is
 the next step for whoever has it.
 
+### Settings: brightness & volume
+
+Two compact rows at the bottom of the idle HUD panel — "Brightness" and "Volume" — each a
+single tappable strip split into a "-" left half and "+" right half, stepping in `kSettingsStep`
+(32) increments. Both apply immediately (`M5.Display.setBrightness()` /
+`M5.Speaker.setVolume()`) and persist across reboots via the save file. Brightness is clamped
+to a floor above zero (`kMinBrightness`) deliberately — a fully black screen has no way to see
+the "+" button that would recover from it; volume has no such floor since 0 (mute) is a normal
+setting.
+
+The save format gained a schema v2 for this (adding `brightness`/`volume` fields to
+`SaveData`), with a migration path: a save written before this change still loads with its
+progress intact and fresh-game default brightness/volume filled in, rather than failing
+validation and resetting everything.
+
 ### Building & Flashing
 
 Requires [PlatformIO](https://platformio.org/):
@@ -101,10 +116,11 @@ python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200
 ### Running Tests
 
 Game logic (3D math, procedural mesh growth, the software rasterizer, the idle-game
-economy, save serialization, offline-earnings math, HUD hit-testing, DDA raycasting, the
-Secret Realm's fixed map/route/enemies, its combat resolution, its autoplay orchestration,
-and its procedural wall textures) is hardware-agnostic C++ under `lib/core/`, unit-tested on
-the host machine — no device required. 78 test cases across 13 suites, all passing:
+economy, save serialization and its v1->v2 migration, offline-earnings math, HUD
+hit-testing, DDA raycasting, the Secret Realm's fixed map/route/enemies, its combat
+resolution, its autoplay orchestration, its procedural wall textures, and brightness/volume
+clamping) is hardware-agnostic C++ under `lib/core/`, unit-tested on the host machine — no
+device required. 87 test cases across 14 suites, all passing:
 
 ```bash
 python3 -m platformio test -e native
@@ -118,9 +134,10 @@ flashes across this project with zero panic/crash/watchdog signatures.
 
 - `lib/core/` — hardware-agnostic game logic, unit-tested via the `native` PlatformIO
   environment: `math3d`/`mesh`/`rasterizer` (the crystal's 3D pipeline), `economy`/`save`/
-  `offline_earnings` (the idle-game loop and persistence), `raycast` (DDA raycasting core),
-  `trial_map`/`trial_combat`/`trial_state`/`trial_textures` (the Secret Realm's fixed map,
-  combat resolution, autoplay orchestration, and procedural wall textures).
+  `offline_earnings` (the idle-game loop and persistence, including the v1->v2 save
+  migration), `raycast` (DDA raycasting core), `trial_map`/`trial_combat`/`trial_state`/
+  `trial_textures` (the Secret Realm's fixed map, combat resolution, autoplay orchestration,
+  and procedural wall textures), `settings` (brightness/volume clamping).
 - `src/` — Arduino/M5Unified/M5GFX glue: `main.cpp` (setup/loop, the 50ms game tick,
   automation, the idle/trial `ViewMode` switch), `ui.h`/`ui.cpp` (HUD layout, drawing, and
   hit-testing for both view modes), `trial_view.h`/`trial_view.cpp` (raycast rendering and
