@@ -12,11 +12,17 @@ const GeneratorDef GENERATORS[NUM_GENERATORS] = {
 
 const char* const REALM_NAMES[NUM_REALMS] = {
     "Mortal Body", "Qi Condensation", "Foundation Establishment",
-    "Core Formation", "Nascent Soul", "Soul Transformation", "Void Refinement"
+    "Core Formation", "Nascent Soul", "Soul Transformation", "Void Refinement",
+    "Spirit Severing", "Dao Seeking", "Immortal Ascension", "Earth Immortal",
+    "Heaven Immortal", "Golden Immortal", "Daluo Immortal", "Saint Realm",
+    "Empyrean Realm"
 };
 
 const double REALM_QI_THRESHOLD[NUM_REALMS] = {
-    0.0, 100.0, 1200.0, 15000.0, 180000.0, 2200000.0, 27000000.0
+    0.0, 100.0, 1200.0, 15000.0, 180000.0, 2200000.0, 27000000.0,
+    320000000.0, 3800000000.0, 46000000000.0, 560000000000.0,
+    6800000000000.0, 82000000000000.0, 1000000000000000.0,
+    12000000000000000.0, 150000000000000000.0
 };
 
 double costForGenerator(int genIndex, int ownedCount) {

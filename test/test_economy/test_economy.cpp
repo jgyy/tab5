@@ -107,6 +107,15 @@ void test_purchase_generator_deducts_cost_and_increments_count() {
     TEST_ASSERT_FLOAT_WITHIN(0.0001, 1000.0 - costBefore, state.qi);
 }
 
+void test_realm_count_is_sixteen_with_expected_names(void) {
+    TEST_ASSERT_EQUAL(16, NUM_REALMS);
+    TEST_ASSERT_EQUAL_STRING("Mortal Body", REALM_NAMES[0]);
+    TEST_ASSERT_EQUAL_STRING("Void Refinement", REALM_NAMES[6]);
+    TEST_ASSERT_EQUAL_STRING("Empyrean Realm", REALM_NAMES[15]);
+    TEST_ASSERT_EQUAL_DOUBLE(27000000.0, REALM_QI_THRESHOLD[6]);
+    TEST_ASSERT_EQUAL_DOUBLE(150000000000000000.0, REALM_QI_THRESHOLD[15]);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_realm_thresholds_increase_monotonically);
@@ -121,5 +130,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_purchase_generator_requires_unlock);
     RUN_TEST(test_purchase_generator_requires_affordability);
     RUN_TEST(test_purchase_generator_deducts_cost_and_increments_count);
+    RUN_TEST(test_realm_count_is_sixteen_with_expected_names);
     return UNITY_END();
 }
