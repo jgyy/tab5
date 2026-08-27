@@ -80,6 +80,7 @@ lib_deps =
 [env:native]
 platform = native
 build_src_filter = -<*>
+build_flags = -DUNITY_INCLUDE_DOUBLE
 ```
 
 This is the exact hardware-env block from `docs/Tab5.pdf`'s PlatformIO section, plus explicit `upload_port`/`monitor_port` for the detected device, plus a `native` env that excludes `src/` (so Arduino-only files never get pulled into host-side test builds) while still auto-discovering `lib/core/`.
