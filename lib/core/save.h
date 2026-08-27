@@ -4,7 +4,7 @@
 #include "economy.h"
 
 constexpr uint32_t SAVE_MAGIC = 0x51494732; // 'QIG2'; bump on breaking format changes
-constexpr uint16_t SAVE_VERSION = 1;
+constexpr uint16_t SAVE_VERSION = 2; // v2 added brightness/volume; see deserializeSave's v1 migration
 
 // NOTE: this struct contains compiler-inserted padding between fields (e.g. around the
 // uint8_t/int64_t tail), and the checksum in serializeSave()/deserializeSave() covers
@@ -21,12 +21,20 @@ struct SaveData {
     uint32_t generatorCounts[NUM_GENERATORS] = {1, 0, 0, 0, 0, 0};
     uint8_t realmIndex = 0;
     int64_t lastSaveEpochSeconds = 0;
+    // Device settings, not game economy - kept out of GameState on purpose (see economy.h).
+    // Scale matches M5Unified's setBrightness()/Speaker.setVolume() (both take uint8_t 0-255).
+    uint8_t brightness = 200;
+    uint8_t volume = 128;
 };
 
 constexpr size_t SAVE_BUFFER_SIZE = sizeof(SaveData) + sizeof(uint32_t); // payload + checksum
 
 SaveData defaultSaveData();
-SaveData toSaveData(const GameState& state, int64_t epochSeconds);
+
+// brightness/volume default to fresh-game values for callers (like tests) that don't care
+// about device settings; main.cpp always passes the device's actual current values.
+SaveData toSaveData(const GameState& state, int64_t epochSeconds, uint8_t brightness = 200,
+                     uint8_t volume = 128);
 GameState toGameState(const SaveData& data);
 
 // Serializes `data` plus a trailing FNV-1a checksum into `outBuffer` (must be at least

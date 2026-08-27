@@ -13,8 +13,14 @@ SaveData nvsLoadSave() {
     size_t got = prefs.getBytes(kKey, buffer, sizeof(buffer));
     prefs.end();
 
+    // Deliberately NOT gated on got == SAVE_BUFFER_SIZE: a save written before schema v2
+    // (brightness/volume) is a few bytes shorter than the current SAVE_BUFFER_SIZE, and
+    // deserializeSave() itself is version-aware (it falls back to the older layout and
+    // migrates). Gating on an exact size match here would reject that shorter-but-valid
+    // legacy blob before deserializeSave ever gets a chance to migrate it, silently
+    // resetting all progress instead.
     SaveData data;
-    if (got == SAVE_BUFFER_SIZE && deserializeSave(buffer, got, data)) {
+    if (got > 0 && deserializeSave(buffer, got, data)) {
         return data;
     }
     return defaultSaveData();
