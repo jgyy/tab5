@@ -1984,6 +1984,11 @@ git commit -m "Add RTC epoch read/write and RTC-based offline-earnings boot flow
 - Consumes: everything from Tasks 2-10 (`Mesh`/`growForRealm`, `Framebuffer`/`rasterizeMesh`, `GameState`/`tick`/`purchaseGenerator`/`attemptBreakthrough`/`GENERATORS`/`REALM_NAMES`, `SaveData`/`nvsLoadSave`/`nvsWriteSave`, `readRtcEpochSeconds`).
 - Produces: `Rect{x,y,w,h}`, `rectContains(const Rect&, int, int)`; `drawHud(M5GFX& display, const GameState&)`, `hitTestHud(int touchX, int touchY) -> int` (returns a button id or -1) — the final integration; nothing downstream depends on this task's output within this plan (Task 12 is documentation only).
 
+> **Addenda picked up live during implementation (real-time user feedback while this task was in progress, not in the original brief text below):**
+> 1. **Fix render-loop flicker.** The user observed visible screen flickering/strobing on an in-progress build. Cause: drawing the HUD directly to `M5.Display` per-frame (interleaved with the crystal viewport's own `pushSprite`) instead of compositing into an offscreen buffer first. Fix: draw the HUD into its own `M5Canvas` (or a single full-screen canvas covering both the crystal and the HUD) and `pushSprite()` once per frame.
+> 2. **Add a top status header bar** (phone-status-bar style): battery percentage + charging status (real `M5.Power` reading, grep-verified against the real M5Unified source the same way Tasks 10/11 verified RTC/Touch), an RTC clock reading (not real-world-accurate, no NTP — just whatever the RTC has been seeded with), and the realm name + Qi/sec readout moved into this header (out of the panel body).
+> 3. **Fill the entire screen, no wasted dead/black space.** Keep the crystal viewport at its Task 8-tuned size (don't grow it — that FPS budget was deliberate), but reflow the generator-list panel and buttons to stretch to the full screen width/height (edges at x=1280, y=720) below the new header, instead of the narrower panel-with-margins layout below.
+
 - [ ] **Step 1: Write the failing hit-test tests**
 
 ```cpp
