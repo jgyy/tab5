@@ -161,6 +161,11 @@ void test_restart_zone_rebuilds_map_for_current_realm(void) {
 // zoneRunIndex changing from the seed that trial started at) - without this, tickZone's
 // built-in auto-restart would just keep rerolling fresh layouts forever and never distinguish
 // "this seed's layout cleared" from "some later reroll eventually cleared".
+//
+// Determinism caveat (see bossClearedOnFirstAttemptCount below for the full explanation): combat
+// resolution depends only on realmIndex, not seed, so the count returned here is deterministically
+// either 0 or `trials` for a given realm, never a genuine statistical distribution - the seed
+// sweep only varies the terrain/route to the encounter, not the fight's outcome.
 int clearedOnFirstAttemptCount(int realm, int trials) {
     int cleared = 0;
     for (int seed = 0; seed < trials; ++seed) {
@@ -634,10 +639,18 @@ void test_player_defeat_mid_boss_fight_resets_boss_state(void) {
 
 // Simulation-style balance check, mirroring the existing clearedOnFirstAttemptCount helper below
 // but for boss zones. A boss is deliberately harder than a regular zone (~100% clear rate) but
-// still meant to be beatable most of the time, not a wall - targets roughly 70-80%. If either of
-// the next two tests fails once real numbers are in, retune kBossBaseHp/kBossHpPerRealm/
-// kBossBaseDamage/kBossDamagePerRealm (zone_map.cpp) or kBossEnrageCooldownMultiplier (below) -
-// not these tests - until back in range.
+// still meant to be beatable, not a wall.
+//
+// Caveat on what "clear rate" means here: combat resolution has no per-trial randomness - player
+// and boss stats depend only on realmIndex, not seed (see zone_map.cpp's boss-constants comment
+// and the Task 2 report), and both combatants' attack timers always start at exactly 0 when a
+// fight begins - so this is deterministically 0% or 100% cleared per realm, never a true
+// statistical sample. The seed sweep only varies the terrain/route to the encounter, not the
+// fight's outcome. A pass below means "winnable at this realm," not "wins X% of the time" - the
+// >=70% threshold in the two tests below is just a convenient all-or-nothing pass bar, not a
+// target distribution. If either of the next two tests fails once real numbers are in, retune
+// kBossBaseHp/kBossHpPerRealm/kBossBaseDamage/kBossDamagePerRealm (zone_map.cpp) or
+// kBossEnrageCooldownMultiplier (below) - not these tests - until back in range.
 int bossClearedOnFirstAttemptCount(int realm, int trials) {
     int cleared = 0;
     for (int seed = 0; seed < trials; ++seed) {
