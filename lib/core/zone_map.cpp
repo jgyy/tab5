@@ -4,8 +4,8 @@ ZoneMap makeZoneMap(int realmIndex) {
     ZoneMap m;
     m.realmIndex = realmIndex;
 
-    int baseHp = 30 + 40 * realmIndex;
-    int baseDamage = 8 + 6 * realmIndex;
+    int baseHp = 30 + 20 * realmIndex;
+    int baseDamage = 8 + 3 * realmIndex;
     constexpr int kTierHpBonus[3] = {0, 20, 50};
     constexpr int kTierDamageBonus[3] = {0, 6, 14};
     constexpr float kSpawnX[3] = {2.5f, 5.0f, 7.5f};

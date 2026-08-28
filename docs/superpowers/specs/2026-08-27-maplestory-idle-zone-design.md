@@ -160,11 +160,14 @@ struct ZoneMap {
 };
 
 // 3 monster spawns evenly spaced across the arena (x = 2.5, 5.0, 7.5). Stats scale from
-// realmIndex using the same additive growth terms makePlayerCombatant already uses (+40
-// maxHp / +6 damage per realmIndex), plus a fixed per-tier bonus, so realmIndex == 0
-// reproduces today's exact Secret Realm numbers (30/8, 50/14, 80/22):
-//   baseHp(realmIndex)     = 30 + 40 * realmIndex
-//   baseDamage(realmIndex) = 8  + 6  * realmIndex
+// realmIndex at a slower additive rate than makePlayerCombatant uses for the player (+20
+// maxHp / +3 damage per realmIndex, versus the player's +40 maxHp / +6 damage) - a zone
+// pits all 3 monsters' aggregate HP/damage against one player HP pool with no recovery
+// between fights, so matching the player's per-realm growth rate here would make the zone
+// unclearable - plus a fixed per-tier bonus, so realmIndex == 0 reproduces today's exact
+// Secret Realm numbers (30/8, 50/14, 80/22):
+//   baseHp(realmIndex)     = 30 + 20 * realmIndex
+//   baseDamage(realmIndex) = 8  + 3  * realmIndex
 //   tier bonuses (monster 0,1,2): hp += {0, 20, 50}, damage += {0, 6, 14}
 // Deterministic - identical every call for the same realmIndex.
 ZoneMap makeZoneMap(int realmIndex);

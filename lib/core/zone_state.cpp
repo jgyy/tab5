@@ -35,6 +35,19 @@ bool allMonstersDefeated(const ZoneState& state) {
     }
     return true;
 }
+
+// The nearest undefeated monster's x position at or ahead of posX, or kArenaWidth if none
+// remain ahead. Used to clamp a single tick's walk step so a large dt can never carry posX
+// past an undefeated monster without triggering an encounter.
+float nearestUndefeatedMonsterXAhead(const ZoneState& state) {
+    float nearest = kArenaWidth;
+    for (size_t i = 0; i < state.map.monsters.size(); ++i) {
+        if (state.monstersDefeated[i]) continue;
+        float x = state.map.monsters[i].x;
+        if (x >= state.posX && x < nearest) nearest = x;
+    }
+    return nearest;
+}
 } // namespace
 
 void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int currentRealmIndex) {
@@ -51,6 +64,9 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
         }
 
         float step = kWalkSpeedUnitsPerSec * static_cast<float>(dtSeconds);
+        float maxStep = nearestUndefeatedMonsterXAhead(state) - state.posX;
+        if (maxStep < 0.0f) maxStep = 0.0f;
+        if (step > maxStep) step = maxStep;
         state.posX += step;
         if (state.posX >= kArenaWidth) {
             state.posX = kArenaWidth;
