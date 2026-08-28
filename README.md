@@ -102,6 +102,30 @@ follow-up revamp:
 Design spec: `docs/superpowers/specs/2026-08-27-raycasting-only-revamp-design.md`
 Implementation plan: `docs/superpowers/plans/2026-08-27-raycasting-only-revamp.md`
 
+### Character skills & graphics pass
+
+The character has a growing, fully-automatic skill kit — 8 realm-gated skills
+(`lib/core/skills.h`), one unlocking every 2 realms, firing round-robin among whatever's
+currently unlocked while `Fighting`, dealing bonus damage on top of the untouched
+`zone_combat` autoattack. No manual activation — this app has no touch controls left, and
+skills don't add any.
+
+Combat now shows floating damage numbers, a skill projectile that travels from the character
+to the current enemy and bursts on impact (color-coded per skill), and a brief screen shake
+reserved for skill impacts. The character has arms, a 4-frame walk cycle, a "casting" pose
+synced to skill fires, and a per-realm aura ring. Monsters get tier-distinct silhouettes
+(round/spiky/winged) instead of a uniform colored circle. The background now drifts with
+parallax clouds/embers/stars (realm-dependent) and deterministic ground texture.
+
+All of this is procedural M5Canvas drawing — no image or audio assets — consistent with the
+rest of this project. New deterministic math (skill unlock/cycling, shake/rise/parallax
+curves) lives in `lib/core/skills.{h,cpp}` and `lib/core/fx.{h,cpp}` and is unit-tested; the
+drawing itself is hardware glue in `src/zone_view.cpp`, unvalidated on real hardware like
+everything else in this project.
+
+Design spec: `docs/superpowers/specs/2026-08-28-maplestory-skills-and-graphics-design.md`
+Implementation plan: `docs/superpowers/plans/2026-08-28-maplestory-skills-and-graphics.md`
+
 **Known limitation — not yet validated on real hardware.** Unlike the old crystal's
 `kRenderSize = 240`, which was empirically tuned against measured on-device FPS (Task 8 of
 the original idle-game plan), no physical Tab5 was connected while this mode was built, so
@@ -121,18 +145,13 @@ but flashing and visually/FPS-testing it on the device is the next step for whoe
 
 ### Settings: brightness & volume
 
-Two compact rows at the bottom of the stats/settings panel — "Brightness" and "Volume" — each a
-single tappable strip split into a "-" left half and "+" right half, stepping in `kSettingsStep`
-(32) increments. Both apply immediately (`M5.Display.setBrightness()` /
-`M5.Speaker.setVolume()`) and persist across reboots via the save file. Brightness is clamped
-to a floor above zero (`kMinBrightness`) deliberately — a fully black screen has no way to see
-the "+" button that would recover from it; volume has no such floor since 0 (mute) is a normal
-setting.
-
-The save format gained a schema v2 for this (adding `brightness`/`volume` fields to
-`SaveData`), with a migration path: a save written before this change still loads with its
-progress intact and fresh-game default brightness/volume filled in, rather than failing
-validation and resetting everything.
+Two full specs' worth of investigation never found a confirmed root cause for the brightness/
+volume rows being unresponsive to touch on real hardware, so the interactive controls were
+removed outright rather than continuing to chase it — this app now has **no touch controls at
+all**. `gBrightness`/`gVolume` still load from and save to NVS, and still apply via
+`M5.Display.setBrightness()`/`M5.Speaker.setVolume()` at boot exactly as before; they're simply
+fixed for the session rather than player-adjustable. The freed panel space went to the zone
+viewport.
 
 ### Building & Flashing
 
@@ -153,8 +172,8 @@ python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200
 Game logic (3D vector/matrix math, the idle-game economy, save serialization and its
 v1->v2 migration, offline-earnings math, HUD hit-testing, DDA raycasting, the Secret
 Realm's fixed map/route/enemies, its combat resolution, its autoplay orchestration, its
-procedural wall textures, and brightness/volume clamping) is hardware-agnostic C++ under
-`lib/core/`, unit-tested on the host machine — no device required. 78 test cases across 12
+procedural wall textures, brightness/volume clamping, the character skill kit, and its FX curves) is hardware-agnostic C++ under
+`lib/core/`, unit-tested on the host machine — no device required. 131 test cases across 14
 suites, all passing:
 
 ```bash
@@ -173,11 +192,11 @@ flashes across this project with zero panic/crash/watchdog signatures.
   `offline_earnings` (the idle-game loop and persistence, including the v1->v2 save
   migration), `raycast` (DDA raycasting core), `trial_map`/`trial_combat`/`trial_state`/
   `trial_textures` (the Secret Realm's fixed map, combat resolution, autoplay orchestration,
-  and procedural wall textures), `settings` (brightness/volume clamping).
+  and procedural wall textures), `settings` (brightness/volume clamping), `skills` (realm-gated automatic combat skills), `fx` (pure shake/damage-number/parallax curves for zone_view).
 - `src/` — Arduino/M5Unified/M5GFX glue: `main.cpp` (setup/loop, the 50ms game tick,
   automation, and driving the always-on Secret Realm trial — there's no `ViewMode` switch
-  anymore, just the one screen), `ui.h`/`ui.cpp` (header and stats/settings panel layout,
-  drawing, and hit-testing for the brightness/volume rows), `trial_view.h`/`trial_view.cpp`
+  anymore, just the one screen), `ui.h`/`ui.cpp` (header and stats/settings panel layout and
+  drawing; no tappable controls remain), `trial_view.h`/`trial_view.cpp`
   (raycast rendering and SFX for the Secret Realm), `nvs_store`/`rtc_store` (persistence and
   offline-earnings glue).
 - `test/` — one PlatformIO test suite per `lib/core/` module.
