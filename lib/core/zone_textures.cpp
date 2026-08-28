@@ -1,5 +1,6 @@
 #include "zone_textures.h"
 #include "hash.h"
+#include "realms.h"
 #include <cstdint>
 #include <cmath>
 
@@ -52,4 +53,10 @@ RGB monsterColor(int realmIndex, int tierIndex) {
     float value = 0.85f - 0.35f * t;    // darkens with tier
     float saturation = 0.6f + 0.3f * t; // more saturated (angrier) with tier
     return hsvToRgb(hue, saturation, value);
+}
+
+RGB characterAuraColor(int realmIndex) {
+    float t = static_cast<float>(realmIndex) / static_cast<float>(NUM_REALMS - 1);
+    float saturation = 0.5f + 0.3f * t; // climbs from 0.5 at realm 0 to 0.8 at realm 15
+    return hsvToRgb(realmHue(realmIndex), saturation, 0.9f);
 }

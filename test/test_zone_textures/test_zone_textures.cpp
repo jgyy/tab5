@@ -63,6 +63,20 @@ void test_platform_color_differs_across_realms(void) {
     TEST_ASSERT_TRUE(a.r != b.r || a.g != b.g || a.b != b.b);
 }
 
+void test_character_aura_color_is_deterministic(void) {
+    RGB a = characterAuraColor(6);
+    RGB b = characterAuraColor(6);
+    TEST_ASSERT_EQUAL_UINT8(a.r, b.r);
+    TEST_ASSERT_EQUAL_UINT8(a.g, b.g);
+    TEST_ASSERT_EQUAL_UINT8(a.b, b.b);
+}
+
+void test_character_aura_color_differs_across_realms(void) {
+    RGB a = characterAuraColor(0);
+    RGB b = characterAuraColor(10);
+    TEST_ASSERT_TRUE(a.r != b.r || a.g != b.g || a.b != b.b);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_sky_color_is_deterministic);
@@ -73,5 +87,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_platform_color_is_deterministic);
     RUN_TEST(test_platform_color_differs_from_sky_and_ground);
     RUN_TEST(test_platform_color_differs_across_realms);
+    RUN_TEST(test_character_aura_color_is_deterministic);
+    RUN_TEST(test_character_aura_color_differs_across_realms);
     return UNITY_END();
 }

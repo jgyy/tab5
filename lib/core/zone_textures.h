@@ -15,3 +15,8 @@ RGB platformColor(int realmIndex);
 // zone - darkens/intensifies with tier so tougher monsters visibly read as tougher, tinted by
 // the same realm hue as the background. Deterministic.
 RGB monsterColor(int realmIndex, int tierIndex);
+
+// Faint ring color drawn around the character in zone_view - reuses the zone's own per-realm
+// hue (not an arbitrary rainbow), saturation climbing with realmIndex for a subtle "aura
+// strengthens with cultivation" progression. Deterministic.
+RGB characterAuraColor(int realmIndex);
