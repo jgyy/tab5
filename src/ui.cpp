@@ -58,6 +58,9 @@ constexpr uint16_t kPlayerHpColor = lgfx::color565(215, 30, 30);   // authentic 
 constexpr uint16_t kPlayerHpGloss = lgfx::color565(255, 140, 130);
 constexpr uint16_t kEnemyHpColor = lgfx::color565(130, 15, 60);    // darker maroon so it reads
 constexpr uint16_t kEnemyHpGloss = lgfx::color565(210, 90, 140);   // distinctly from player HP
+constexpr uint16_t kBossHpColor = lgfx::color565(90, 10, 90);      // deep crimson-purple - reads as
+                                                                   // more alarming than a regular enemy
+constexpr uint16_t kBossHpGloss = lgfx::color565(200, 80, 200);
 constexpr uint16_t kExpColor = lgfx::color565(210, 180, 60);       // Maple EXP-bar yellow
 constexpr uint16_t kExpGloss = lgfx::color565(240, 220, 140);
 constexpr uint16_t kQuestColor = lgfx::color565(50, 160, 165);     // monsters/route progress
@@ -353,17 +356,21 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
             IconKind::Heart);
 
     bool fighting = (zone.phase == ZonePhase::Fighting);
+    bool fightingBoss = fighting && zone.currentEncounterIsBoss;
     float enemyFraction = (fighting && zone.enemy.maxHp > 0)
         ? static_cast<float>(zone.enemy.hp) / static_cast<float>(zone.enemy.maxHp)
         : 0.0f;
     char enemyLabel[32];
-    if (fighting) {
+    if (fightingBoss) {
+        snprintf(enemyLabel, sizeof(enemyLabel), "BOSS HP %d/%d", zone.enemy.hp, zone.enemy.maxHp);
+    } else if (fighting) {
         snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP %d/%d", zone.enemy.hp, zone.enemy.maxHp);
     } else {
         snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP --");
     }
-    drawBar(panel, columnRect(row, 1), enemyFraction, kEnemyHpColor, kEnemyHpGloss, enemyLabel, 2,
-            IconKind::Skull);
+    drawBar(panel, columnRect(row, 1), enemyFraction,
+            fightingBoss ? kBossHpColor : kEnemyHpColor, fightingBoss ? kBossHpGloss : kEnemyHpGloss,
+            enemyLabel, 2, IconKind::Skull);
 
     int totalMonsters = static_cast<int>(zone.map.monsters.size());
     int defeatedCount = 0;
