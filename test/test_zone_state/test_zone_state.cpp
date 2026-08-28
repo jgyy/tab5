@@ -663,6 +663,15 @@ int bossClearedOnFirstAttemptCount(int realm, int trials) {
     return cleared;
 }
 
+// Realm 0 is every new player's actual starting state and the tightest point on the boss
+// difficulty curve (the player finishes a realm-0 boss with the least HP left of any realm), so
+// it gets its own case rather than being extrapolated from realm 1's.
+void test_boss_zone_clear_rate_is_challenging_but_reasonable_at_realm_zero(void) {
+    constexpr int kTrials = 30;
+    int cleared = bossClearedOnFirstAttemptCount(0, kTrials);
+    TEST_ASSERT_TRUE(cleared >= kTrials * 7 / 10);
+}
+
 void test_boss_zone_clear_rate_is_challenging_but_reasonable_at_low_realm(void) {
     constexpr int kTrials = 30;
     int cleared = bossClearedOnFirstAttemptCount(1, kTrials);
@@ -723,6 +732,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_boss_defeat_grants_bonus_reward_and_flags_the_tick);
     RUN_TEST(test_boss_zone_total_reward_is_double_a_regular_zones);
     RUN_TEST(test_player_defeat_mid_boss_fight_resets_boss_state);
+    RUN_TEST(test_boss_zone_clear_rate_is_challenging_but_reasonable_at_realm_zero);
     RUN_TEST(test_boss_zone_clear_rate_is_challenging_but_reasonable_at_low_realm);
     RUN_TEST(test_boss_zone_clear_rate_is_challenging_but_reasonable_at_high_realm);
     return UNITY_END();
