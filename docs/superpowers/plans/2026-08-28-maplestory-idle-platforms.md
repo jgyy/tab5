@@ -751,7 +751,24 @@ to:
 void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int currentRealmIndex);
 ```
 
-In `test/test_zone_state/test_zone_state.cpp`, replace `test_large_dt_does_not_skip_monsters` (the one existing test that directly reads `kArenaWidth`, which no longer reflects `ZoneState`'s traversal model):
+In `test/test_zone_state/test_zone_state.cpp`, replace `test_reaching_monster_enters_fighting` — its loop condition (`s.phase == ZonePhase::Walking`) stops the instant the character reaches platform 0's edge and enters `Jumping` (platform 0, the ground, never has a monster on it), so under the new state machine it would exit *before* ever crossing onto platform 1 where the first monster now lives, and the following `TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting)` would fail. Every sibling test that loops toward `Fighting` already uses the safe `s.phase != ZonePhase::Fighting` form (tolerating any number of intervening `Walking`/`Jumping` transitions); this one needs the same fix:
+
+```cpp
+void test_reaching_monster_enters_fighting(void) {
+    ZoneMap m = makeZoneMap(0);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 200 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    TEST_ASSERT_EQUAL_INT(0, s.currentMonsterIndex);
+    TEST_ASSERT_EQUAL_INT(30, s.enemy.maxHp);
+}
+```
+
+(200 ticks of 0.1s is 20 simulated seconds — comfortably enough to cross platform 0's up-to-4-unit width, complete the jump, and reach the first monster on platform 1, all at `kWalkSpeedUnitsPerSec = 1.5`.)
+
+Also replace `test_large_dt_does_not_skip_monsters` (the other existing test that directly reads `kArenaWidth`, which no longer reflects `ZoneState`'s traversal model):
 
 ```cpp
 void test_large_dt_does_not_skip_monsters(void) {
@@ -1007,7 +1024,7 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
 - [ ] **Step 12: Run test to verify it passes**
 
 Run: `python3 -m platformio test -e native -f test_zone_state`
-Expected: PASS (all 20 cases: 12 original — one adapted in Step 9 — plus 8 new from Steps 5 and 9).
+Expected: PASS (all 25 cases: 12 original — two adapted in Step 9 — plus 13 new: 9 pure-function cases from Step 5 and 4 platform-traversal cases from Step 9).
 
 - [ ] **Step 13: Run the full native suite**
 
