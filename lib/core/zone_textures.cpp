@@ -55,6 +55,14 @@ RGB monsterColor(int realmIndex, int tierIndex) {
     return hsvToRgb(hue, saturation, value);
 }
 
+RGB bossColor(int realmIndex) {
+    constexpr int kBossColorSalt = 99; // distinct from monsterColor's tierIndex-keyed salts (0,1,2)
+    float hueJitter = (hashUnitFloat(realmIndex, kBossColorSalt) - 0.5f) * 20.0f; // +-10 degrees,
+                                                                                   // same range monsterColor uses
+    float hue = realmHue(realmIndex) + 180.0f + hueJitter; // opposite the background hue, same family as monsterColor
+    return hsvToRgb(hue, 1.0f, 0.35f); // more saturated, darker than monsterColor's toughest tier (tier 2: sat 0.9, value 0.5)
+}
+
 RGB characterAuraColor(int realmIndex) {
     float t = static_cast<float>(realmIndex) / static_cast<float>(NUM_REALMS - 1);
     float saturation = 0.5f + 0.3f * t; // climbs from 0.5 at realm 0 to 0.8 at realm 15

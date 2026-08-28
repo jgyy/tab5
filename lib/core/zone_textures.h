@@ -16,6 +16,11 @@ RGB platformColor(int realmIndex);
 // the same realm hue as the background. Deterministic.
 RGB monsterColor(int realmIndex, int tierIndex);
 
+// Boss body color for a realm's zone - darker and more saturated than any regular monsterColor
+// tier (even tier 2, the toughest), so a boss reads as visually distinct at a glance. Same
+// "opposite the background hue" family as monsterColor. Deterministic.
+RGB bossColor(int realmIndex);
+
 // Faint ring color drawn around the character in zone_view - reuses the zone's own per-realm
 // hue (not an arbitrary rainbow), saturation climbing with realmIndex for a subtle "aura
 // strengthens with cultivation" progression. Deterministic.
