@@ -7,6 +7,10 @@
 RGB zoneSkyColor(int realmIndex);
 RGB zoneGroundColor(int realmIndex);
 
+// Ledge fill color for a realm's elevated platforms - distinct from both zoneSkyColor and
+// zoneGroundColor, tinted by the same per-realm hue. Deterministic.
+RGB platformColor(int realmIndex);
+
 // Monster body color for the tierIndex-th spawn (0,1,2 = increasing difficulty) in a realm's
 // zone - darkens/intensifies with tier so tougher monsters visibly read as tougher, tinted by
 // the same realm hue as the background. Deterministic.

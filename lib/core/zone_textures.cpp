@@ -41,6 +41,10 @@ RGB zoneGroundColor(int realmIndex) {
     return hsvToRgb(realmHue(realmIndex), 0.55f, 0.45f);
 }
 
+RGB platformColor(int realmIndex) {
+    return hsvToRgb(realmHue(realmIndex), 0.45f, 0.65f);
+}
+
 RGB monsterColor(int realmIndex, int tierIndex) {
     float t = static_cast<float>(tierIndex) / 2.0f; // 0, 0.5, 1.0 for tiers 0,1,2
     float hueJitter = (hashUnitFloat(realmIndex, tierIndex) - 0.5f) * 20.0f; // +-10 degrees
