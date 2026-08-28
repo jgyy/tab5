@@ -1216,6 +1216,17 @@ uint32_t gAttackFlashUntilMs = 0; // flash on the monster - player's attack land
 uint32_t gHitFlashUntilMs = 0;    // flash on the character - enemy's attack landed
 constexpr uint32_t kFlashDurationMs = 150;
 
+// Last-known screen position of the current (or most recently current) enemy - a module-static
+// cache, NOT a per-call local, because a skill FX or damage number can still be animating for
+// up to kSkillFxTotalMs/kDamageNumberDurationMs after the enemy that triggered it is defeated
+// (monstersDefeated[i] becomes true and currentMonsterIndex resets to -1 on the very same
+// tickZone() call that lands the killing blow, so no monster is ever isCurrent again for that
+// enemy). A per-call local reset to (0,0) every render would make any FX/number still in flight
+// at the moment of a kill snap to the screen's top-left corner instead of the enemy's last
+// position - this cache is what keeps it pinned there until a new monster becomes current.
+int gLastEnemyScreenX = 0;
+int gLastEnemyScreenY = 0;
+
 // Skill projectile/impact/shake state - triggerSkillFx() latches these, renderZoneView()
 // re-derives the current animation frame from elapsed time every call (position is static
 // during Fighting, same reasoning the pre-existing attack/hit flash already relies on).
@@ -1309,8 +1320,6 @@ Change the monster-drawing loop from:
 to:
 
 ```cpp
-    int currentEnemyScreenX = 0;
-    int currentEnemyScreenY = 0;
     for (size_t i = 0; i < state.map.monsters.size(); ++i) {
         if (state.monstersDefeated[i]) continue;
         bool isCurrent = (state.phase == ZonePhase::Fighting &&
@@ -1326,11 +1335,15 @@ to:
         drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent);
         if (isCurrent) {
             drawFlash(canvas, mx, my, nowMs, gAttackFlashUntilMs);
-            currentEnemyScreenX = mx;
-            currentEnemyScreenY = my;
+            gLastEnemyScreenX = mx;
+            gLastEnemyScreenY = my;
         }
     }
 ```
+
+(Uses the module-static `gLastEnemyScreenX`/`gLastEnemyScreenY` added in Step 2 - NOT a per-call
+local - so the position survives past the render call where the enemy is defeated instead of
+resetting to (0,0).)
 
 Change the end of the function from:
 
@@ -1360,11 +1373,11 @@ to:
         skillColors(SKILLS[gSkillFxIndex].visual, fillColor, ringColor);
         if (skillElapsed < kSkillTravelMs) {
             float t = static_cast<float>(skillElapsed) / static_cast<float>(kSkillTravelMs);
-            int px = charX + static_cast<int>((currentEnemyScreenX - charX) * t);
-            int py = charY + static_cast<int>((currentEnemyScreenY - charY) * t);
+            int px = charX + static_cast<int>((gLastEnemyScreenX - charX) * t);
+            int py = charY + static_cast<int>((gLastEnemyScreenY - charY) * t);
             canvas.fillCircle(px, py - 20, 5, fillColor); // -20 keeps it roughly chest-height
         } else {
-            drawFlash(canvas, currentEnemyScreenX, currentEnemyScreenY, nowMs,
+            drawFlash(canvas, gLastEnemyScreenX, gLastEnemyScreenY, nowMs,
                       gSkillFxStartMs + kSkillFxTotalMs, 10, 16, fillColor, ringColor);
         }
         if (skillElapsed < kShakeDurationMs) {
@@ -1379,8 +1392,8 @@ to:
         if (!dn.active) continue;
         uint32_t elapsed = nowMs - dn.spawnMs;
         if (elapsed >= kDamageNumberDurationMs) { dn.active = false; continue; }
-        int baseX = dn.onPlayer ? charX : currentEnemyScreenX;
-        int baseY = dn.onPlayer ? charY : currentEnemyScreenY;
+        int baseX = dn.onPlayer ? charX : gLastEnemyScreenX;
+        int baseY = dn.onPlayer ? charY : gLastEnemyScreenY;
         float rise = damageNumberRiseOffsetPx(static_cast<float>(elapsed) / 1000.0f, kDamageNumberRisePxPerSec);
         int drawY = baseY - 30 + static_cast<int>(rise); // -30 starts above the head, not the feet
         char buf[8];
