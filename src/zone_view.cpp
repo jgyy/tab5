@@ -4,6 +4,7 @@
 #include "skills.h"
 #include "fx.h"
 #include <cstdio>
+#include <cmath>
 
 namespace {
 M5Canvas* gZoneCanvas = nullptr;
@@ -116,15 +117,45 @@ void drawPlatform(M5Canvas& canvas, int screenX0, int screenX1, int screenY, RGB
     canvas.fillRect(screenX0, screenY, screenX1 - screenX0, kLedgeThickness, fill);
 }
 
-void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color, bool isCurrent) {
+void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color, bool isCurrent, int tierIndex) {
     int radius = 10 + maxHp / 15; // bigger monsters read as tougher
     if (radius > 40) radius = 40;
     uint16_t fill = canvas.color565(color.r, color.g, color.b);
-    canvas.fillCircle(screenX, standY - radius, radius, fill);
-    canvas.fillCircle(screenX - radius / 3, standY - radius, 2, TFT_BLACK); // eye
-    canvas.fillCircle(screenX + radius / 3, standY - radius, 2, TFT_BLACK); // eye
+
+    if (tierIndex <= 0) {
+        // Tier 0: round "slime" body - today's original silhouette.
+        canvas.fillCircle(screenX, standY - radius, radius, fill);
+    } else if (tierIndex == 1) {
+        // Tier 1: diamond body with 4 spikes around the rim - reads sharper/angrier.
+        int cy = standY - radius;
+        canvas.fillTriangle(screenX, cy - radius, screenX - radius, cy, screenX, cy + radius, fill);
+        canvas.fillTriangle(screenX, cy - radius, screenX + radius, cy, screenX, cy + radius, fill);
+        constexpr int kSpikes = 4;
+        for (int s = 0; s < kSpikes; ++s) {
+            float angle = (6.2831853f / kSpikes) * static_cast<float>(s);
+            int tipX = screenX + static_cast<int>((radius + 6) * std::cos(angle));
+            int tipY = cy + static_cast<int>((radius + 6) * std::sin(angle));
+            int baseX1 = screenX + static_cast<int>(radius * std::cos(angle - 0.2f));
+            int baseY1 = cy + static_cast<int>(radius * std::sin(angle - 0.2f));
+            int baseX2 = screenX + static_cast<int>(radius * std::cos(angle + 0.2f));
+            int baseY2 = cy + static_cast<int>(radius * std::sin(angle + 0.2f));
+            canvas.fillTriangle(tipX, tipY, baseX1, baseY1, baseX2, baseY2, fill);
+        }
+    } else {
+        // Tier 2: biggest body plus wing/horn shapes - reads as the toughest silhouette.
+        int bigRadius = radius + 6;
+        int cy = standY - bigRadius;
+        canvas.fillCircle(screenX, cy, bigRadius, fill);
+        canvas.fillTriangle(screenX - bigRadius, cy, screenX - bigRadius - 10, cy - 8, screenX - bigRadius - 10, cy + 8, fill);
+        canvas.fillTriangle(screenX + bigRadius, cy, screenX + bigRadius + 10, cy - 8, screenX + bigRadius + 10, cy + 8, fill);
+        radius = bigRadius; // so the eyes/current-ring below sit correctly on the enlarged body
+    }
+
+    int eyeY = standY - radius;
+    canvas.fillCircle(screenX - radius / 3, eyeY, 2, TFT_BLACK);
+    canvas.fillCircle(screenX + radius / 3, eyeY, 2, TFT_BLACK);
     if (isCurrent) {
-        canvas.drawCircle(screenX, standY - radius, radius + 3, TFT_YELLOW);
+        canvas.drawCircle(screenX, eyeY, radius + 3, TFT_YELLOW);
     }
 }
 
@@ -211,7 +242,7 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
         int mx = screenXFor(liveX, state.map.arenaWidth);
         int my = screenYFor(platform.y, groundY);
         RGB color = monsterColor(state.map.realmIndex, static_cast<int>(i));
-        drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent);
+        drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent, static_cast<int>(i));
         if (isCurrent) {
             drawFlash(canvas, mx, my, nowMs, gAttackFlashUntilMs);
             gLastEnemyScreenX = mx;
