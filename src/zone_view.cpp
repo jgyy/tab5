@@ -128,20 +128,41 @@ void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color
     }
 }
 
-void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, uint32_t nowMs) {
+void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, uint32_t nowMs, int realmIndex) {
     constexpr int kBodyHeight = 26;
     constexpr int kHeadRadius = 7;
     constexpr int kAirborneLegTuck = 6; // airborne pose: legs tucked up higher than walk/idle
+    constexpr int kArmLength = 10;
+    constexpr uint32_t kCastingPoseMs = 200;
     bool walking = (phase == ZonePhase::Walking);
     bool jumping = (phase == ZonePhase::Jumping);
-    int bob = (walking && ((nowMs / 150) % 2 == 0)) ? 0 : 2; // 2-frame walk cycle
+    bool casting = gSkillFxIndex >= 0 && (nowMs - gSkillFxStartMs) < kCastingPoseMs;
+
+    constexpr int kWalkBobFrames[4] = {0, 1, 2, 1}; // 4-frame walk cycle (was 2-frame)
+    int bob = walking ? kWalkBobFrames[(nowMs / 100) % 4] : 0;
     int legTuck = jumping ? kAirborneLegTuck : 0;
     int headY = standY - kBodyHeight - kHeadRadius + bob;
     int bodyTop = standY - kBodyHeight + bob;
+    int shoulderY = bodyTop + 4;
+
+    RGB aura = characterAuraColor(realmIndex);
+    uint16_t auraColor = canvas.color565(aura.r, aura.g, aura.b);
+    canvas.drawCircle(screenX, (headY + standY) / 2, kBodyHeight, auraColor);
+
     canvas.fillCircle(screenX, headY, kHeadRadius, TFT_WHITE);
     canvas.fillRect(screenX - 5, bodyTop, 10, kBodyHeight, TFT_BLUE);
-    canvas.fillRect(screenX - 5, standY - 4 + bob - legTuck, 4, 4, TFT_NAVY);          // left leg
-    canvas.fillRect(screenX + 1, standY - (bob == 0 ? 4 : 8) - legTuck, 4, 4, TFT_NAVY); // right leg
+
+    if (casting) {
+        // Arms raised overhead, synced to a fired skill's opening frames.
+        canvas.drawLine(screenX - 5, shoulderY, screenX - kArmLength, shoulderY - kArmLength, TFT_WHITE);
+        canvas.drawLine(screenX + 5, shoulderY, screenX + kArmLength, shoulderY - kArmLength, TFT_WHITE);
+    } else {
+        canvas.drawLine(screenX - 5, shoulderY, screenX - kArmLength, shoulderY + kArmLength / 2, TFT_WHITE);
+        canvas.drawLine(screenX + 5, shoulderY, screenX + kArmLength, shoulderY + kArmLength / 2, TFT_WHITE);
+    }
+
+    canvas.fillRect(screenX - 5, standY - 4 + bob - legTuck, 4, 4, TFT_NAVY); // left leg
+    canvas.fillRect(screenX + 1, standY - 4 - bob - legTuck, 4, 4, TFT_NAVY); // right leg - moves opposite the left for a scissor gait
 }
 
 void drawFlash(M5Canvas& canvas, int screenX, int standY, uint32_t nowMs, uint32_t untilMs,
@@ -200,7 +221,7 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
 
     int charX = screenXFor(state.posX, state.map.arenaWidth);
     int charY = screenYFor(state.posY, groundY);
-    drawCharacter(canvas, charX, charY, state.phase, nowMs);
+    drawCharacter(canvas, charX, charY, state.phase, nowMs, state.map.realmIndex);
     if (state.phase == ZonePhase::Fighting) drawFlash(canvas, charX, charY, nowMs, gHitFlashUntilMs);
 
     uint32_t skillElapsed = nowMs - gSkillFxStartMs;
