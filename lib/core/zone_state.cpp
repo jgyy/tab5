@@ -46,6 +46,10 @@ float patrolRangeForPlatform(const Platform& platform, float spawnX) {
     return half < kMaxPatrolRange ? half : kMaxPatrolRange;
 }
 
+bool isBossZoneForRunIndex(int zoneRunIndex) {
+    return (zoneRunIndex + 1) % kBossZoneInterval == 0;
+}
+
 ZoneState startZone(const ZoneMap& map, int realmIndex, int zoneRunIndex) {
     ZoneState s;
     s.map = map;
@@ -60,12 +64,17 @@ ZoneState startZone(const ZoneMap& map, int realmIndex, int zoneRunIndex) {
     s.monstersDefeated.assign(map.monsters.size(), false);
     s.qiRewardPending = 0.0;
     s.zoneRunIndex = zoneRunIndex;
+    s.currentEncounterIsBoss = false;
+    s.bossEnraged = false;
+    s.bossJustEnraged = false;
+    s.bossJustDefeated = false;
     return s;
 }
 
 void restartZone(ZoneState& state, int currentRealmIndex) {
     int nextRunIndex = state.zoneRunIndex + 1;
-    state = startZone(makeZoneMap(currentRealmIndex, nextRunIndex), currentRealmIndex, nextRunIndex);
+    bool boss = isBossZoneForRunIndex(nextRunIndex);
+    state = startZone(makeZoneMap(currentRealmIndex, nextRunIndex, boss), currentRealmIndex, nextRunIndex);
 }
 
 namespace {
@@ -107,6 +116,8 @@ float walkTargetXOnCurrentPlatform(const ZoneState& state) {
 
 void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int currentRealmIndex) {
     state.skillFiredThisTick = -1; // reset every call - a caller inspects this immediately after
+    state.bossJustEnraged = false; // same reset-every-call contract as skillFiredThisTick above
+    state.bossJustDefeated = false;
     if (state.phase == ZonePhase::Cleared) return;
 
     if (state.phase == ZonePhase::Walking) {
@@ -118,6 +129,7 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
             state.currentMonsterIndex = engaged;
             const MonsterSpawn& spawn = state.map.monsters[static_cast<size_t>(engaged)];
             state.enemy = makeEnemyCombatant(spawn.maxHp, spawn.damage);
+            state.currentEncounterIsBoss = spawn.isBoss;
             return;
         }
 
@@ -136,7 +148,10 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
             if (isLastPlatform) {
                 if (allMonstersDefeated(state)) {
                     state.phase = ZonePhase::Cleared;
-                    state.qiRewardPending = proposedReward;
+                    state.qiRewardPending += proposedReward; // was `=` - `+=` so a boss bonus staged
+                                                               // earlier in this zone isn't clobbered;
+                                                               // safe for non-boss zones too, since
+                                                               // qiRewardPending is always 0.0 here
                 }
                 // Otherwise: nothing left to walk into and no next platform - the skip-clamp
                 // above already prevents reaching here with an undefeated monster still ahead
@@ -173,6 +188,17 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
         state.enemy.hp -= skillDamage;
         if (state.enemy.hp < 0) state.enemy.hp = 0;
     }
+
+    // Boss enrage: a one-time, HP-threshold escalation - checked after this tick's damage so it
+    // can trigger the same tick a skill/autoattack crosses the 50% line, latched via bossEnraged
+    // so it can never fire twice for the same encounter (a boss never heals).
+    if (state.currentEncounterIsBoss && !state.bossEnraged &&
+        state.enemy.hp > 0 && state.enemy.hp <= state.enemy.maxHp / 2) {
+        state.enemy.attackCooldownSeconds *= kBossEnrageCooldownMultiplier;
+        state.bossEnraged = true;
+        state.bossJustEnraged = true;
+    }
+
     // Player defeat is checked FIRST: tickCombat() can land both attacks in the same call
     // whenever dtSeconds is large enough to cross both combatants' attack cooldowns at once (a
     // real occurrence here - see main.cpp's SFX delay() calls, which inflate the next loop()
@@ -184,8 +210,16 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
     if (isDefeated(state.player)) {
         restartZone(state, currentRealmIndex);
     } else if (isDefeated(state.enemy)) {
+        if (state.currentEncounterIsBoss) {
+            // Bonus reward, on top of the zone's own clear reward staged at the Cleared
+            // transition above (now `+=`, not `=`, so this isn't clobbered).
+            state.qiRewardPending += proposedReward;
+            state.bossJustDefeated = true;
+        }
         state.monstersDefeated[static_cast<size_t>(state.currentMonsterIndex)] = true;
         state.currentMonsterIndex = -1;
+        state.currentEncounterIsBoss = false;
+        state.bossEnraged = false;
         state.phase = ZonePhase::Walking;
         // A zone can roll several monsters per platform now, not always exactly 3 - full-healing
         // on every kill keeps each fight its own "can I beat this one enemy" test (this module's

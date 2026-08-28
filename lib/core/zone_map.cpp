@@ -21,10 +21,21 @@ constexpr int kMaxDifficultyTier = 2;
 
 // Boss stats: a single much-tougher monster in lieu of the platform-tiered roster (see
 // makeZoneMap's isBossZone branch) - deliberately not derived from the tier formula above,
-// since a boss isn't "one more tier," it's its own fight. First-pass numbers, to be tuned in
-// Task 2 against zone_state's boss-clear-rate simulation test.
-constexpr int kBossBaseHp = 300, kBossHpPerRealm = 120;
-constexpr int kBossBaseDamage = 18, kBossDamagePerRealm = 9;
+// since a boss isn't "one more tier," it's its own fight. Tuned in Task 2 against zone_state's
+// boss-clear-rate simulation test: both the player's and the enemy's autoattack cadence are
+// fixed (1.0s / 1.2s, zone_combat.h) regardless of realm, so only the flat per-hit numbers here
+// control the fight - the first-pass values (300/120 hp, 18/9 damage) put the boss's sustained
+// dps far above what any realm's player maxHp budget could ever absorb over the much longer
+// (bulkier-HP) fight, making it unwinnable at every realm, not just an edge case. This revision
+// keeps the boss a genuine endurance test - HP alone roughly 4x a matched-realm top-tier
+// platform monster's, so the fight runs ~12-22s instead of a regular fight's ~3-5s - while
+// dropping the per-hit damage well below a regular monster's so total damage absorbed over that
+// much longer fight still lands the player around 15-50% HP remaining (deterministic per
+// realm - see the sim notes in the Task 2 report). Verified across realm 0-15 by the
+// scratch simulation in the Task 2 report, and pinned at realm 0/10 by
+// test_boss_stats_match_the_boss_formula in test_zone_map.
+constexpr int kBossBaseHp = 300, kBossHpPerRealm = 90;
+constexpr int kBossBaseDamage = 4, kBossDamagePerRealm = 2;
 
 int bossMaxHp(int realmIndex) { return kBossBaseHp + kBossHpPerRealm * realmIndex; }
 int bossDamage(int realmIndex) { return kBossBaseDamage + kBossDamagePerRealm * realmIndex; }

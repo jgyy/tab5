@@ -308,13 +308,16 @@ void test_boss_monster_sits_at_its_platforms_midpoint(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, mid, m.monsters[0].x);
 }
 
+// Pins the Task 2 retuned boss formula (kBossBaseHp/kBossHpPerRealm/kBossBaseDamage/
+// kBossDamagePerRealm in zone_map.cpp) - see that file's comment and the Task 2 report for why
+// the first-pass numbers (300/120 hp, 18/9 damage) made the boss unwinnable at every realm.
 void test_boss_stats_match_the_boss_formula(void) {
     ZoneMap low = makeZoneMap(0, 0, true);
     ZoneMap high = makeZoneMap(10, 0, true);
     TEST_ASSERT_EQUAL(300, low.monsters[0].maxHp);
-    TEST_ASSERT_EQUAL(18, low.monsters[0].damage);
-    TEST_ASSERT_EQUAL(300 + 120 * 10, high.monsters[0].maxHp);
-    TEST_ASSERT_EQUAL(18 + 9 * 10, high.monsters[0].damage);
+    TEST_ASSERT_EQUAL(4, low.monsters[0].damage);
+    TEST_ASSERT_EQUAL(300 + 90 * 10, high.monsters[0].maxHp);
+    TEST_ASSERT_EQUAL(4 + 2 * 10, high.monsters[0].damage);
 }
 
 // Regression: the isBossZone==false path (including its default) must be completely untouched.

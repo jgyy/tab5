@@ -64,7 +64,23 @@ struct ZoneState {
     int skillFiredThisTick = -1;  // SKILLS[] index fired on the most recent tickZone() call, or -1
     int zoneRunIndex = 0;         // seed `map` was built with; restartZone() bumps this so looping
                                    // the same realm doesn't keep regenerating the same layout
+    bool currentEncounterIsBoss = false; // set at the Walking->Fighting transition from the
+                                          // engaged spawn's isBoss; cleared when that encounter ends
+    bool bossEnraged = false;            // latches true once, never clears mid-fight (boss never heals)
+    bool bossJustEnraged = false;        // pulses true on the single tickZone() call enrage triggers;
+                                          // reset every call, same contract as skillFiredThisTick
+    bool bossJustDefeated = false;       // pulses true on the single tickZone() call a boss dies;
+                                          // reset every call
 };
+
+constexpr int kBossZoneInterval = 3; // every Nth zone loop is a boss zone
+constexpr float kBossEnrageCooldownMultiplier = 0.7f; // ~43% faster attacks once enraged
+
+// True for the 3rd, 6th, 9th... zone loop (1-indexed) - i.e. zoneRunIndex values 2, 5, 8, ....
+// zoneRunIndex 0 (the very first zone of a session) is never a boss zone. Callers building a
+// ZoneMap (main.cpp's boot call, restartZone() below) use this to decide the isBossZone argument
+// to makeZoneMap() - makeZoneMap() itself has no opinion on which loops are boss zones.
+bool isBossZoneForRunIndex(int zoneRunIndex);
 
 // Fresh zone at the arena's start (posX = 0), Walking, player stats derived from realmIndex.
 // `zoneRunIndex` is the seed `map` was built with (defaults to 0 for the very first zone of a

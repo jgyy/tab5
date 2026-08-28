@@ -528,6 +528,140 @@ void test_restart_zone_resets_skill_state(void) {
     TEST_ASSERT_EQUAL_INT(-1, s.skillFiredThisTick);
 }
 
+void test_is_boss_zone_for_run_index_matches_every_third_loop(void) {
+    TEST_ASSERT_FALSE(isBossZoneForRunIndex(0));
+    TEST_ASSERT_FALSE(isBossZoneForRunIndex(1));
+    TEST_ASSERT_TRUE(isBossZoneForRunIndex(2));
+    TEST_ASSERT_FALSE(isBossZoneForRunIndex(3));
+    TEST_ASSERT_FALSE(isBossZoneForRunIndex(4));
+    TEST_ASSERT_TRUE(isBossZoneForRunIndex(5));
+    TEST_ASSERT_FALSE(isBossZoneForRunIndex(6));
+    TEST_ASSERT_FALSE(isBossZoneForRunIndex(7));
+    TEST_ASSERT_TRUE(isBossZoneForRunIndex(8));
+}
+
+void test_restart_zone_builds_a_boss_zone_on_the_right_loop(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0); // zoneRunIndex 0
+    restartZone(s, 0); // -> zoneRunIndex 1, not a boss zone
+    TEST_ASSERT_FALSE(s.map.monsters[0].isBoss);
+    restartZone(s, 0); // -> zoneRunIndex 2, a boss zone
+    TEST_ASSERT_EQUAL_INT(2, s.zoneRunIndex);
+    TEST_ASSERT_EQUAL_INT(1, (int)s.map.monsters.size());
+    TEST_ASSERT_TRUE(s.map.monsters[0].isBoss);
+}
+
+// Mirrors how the existing skill tests force specific HP values rather than waiting out real
+// damage - forces the boss to exactly the enrage threshold, then confirms it fires exactly once.
+void test_boss_enrage_triggers_once_at_half_hp(void) {
+    ZoneMap m = makeZoneMap(0, 0, true);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    TEST_ASSERT_TRUE(s.currentEncounterIsBoss);
+
+    float cooldownBeforeEnrage = s.enemy.attackCooldownSeconds;
+    s.enemy.hp = s.enemy.maxHp / 2; // exactly at the threshold
+    tickZone(s, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s.bossEnraged);
+    TEST_ASSERT_TRUE(s.bossJustEnraged);
+    TEST_ASSERT_TRUE(s.enemy.attackCooldownSeconds < cooldownBeforeEnrage);
+
+    // A further tick must NOT re-trigger (latched) or shorten the cooldown a second time.
+    float cooldownAfterEnrage = s.enemy.attackCooldownSeconds;
+    tickZone(s, 0.1, 10.0, 0);
+    TEST_ASSERT_FALSE(s.bossJustEnraged);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, cooldownAfterEnrage, s.enemy.attackCooldownSeconds);
+}
+
+void test_boss_defeat_grants_bonus_reward_and_flags_the_tick(void) {
+    ZoneMap m = makeZoneMap(0, 0, true);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    s.enemy.hp = 1; // dies on the next landed autoattack
+    bool sawDefeatFlag = false;
+    for (int i = 0; i < 50 && s.phase == ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+        if (s.bossJustDefeated) sawDefeatFlag = true;
+    }
+    TEST_ASSERT_TRUE(sawDefeatFlag);
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Walking);
+    TEST_ASSERT_FLOAT_WITHIN(0.001, 10.0, s.qiRewardPending); // bonus staged; zone-clear reward comes later
+}
+
+// End-to-end: a boss zone's total payout is double a regular zone's (bonus at the kill + the
+// zone's own clear reward, both accumulated via `+=`), while a regular zone's total is
+// unchanged at exactly proposedReward - the regression check on the `=` -> `+=` change.
+void test_boss_zone_total_reward_is_double_a_regular_zones(void) {
+    ZoneState boss = startZone(makeZoneMap(15, 0, true), 15);
+    for (int i = 0; i < 5000 && boss.phase != ZonePhase::Cleared; ++i) {
+        tickZone(boss, 0.1, 42.0, 15);
+    }
+    TEST_ASSERT_TRUE(boss.phase == ZonePhase::Cleared);
+    TEST_ASSERT_FLOAT_WITHIN(0.001, 84.0, boss.qiRewardPending);
+
+    ZoneState regular = startZone(makeZoneMap(15, 0, false), 15);
+    for (int i = 0; i < 5000 && regular.phase != ZonePhase::Cleared; ++i) {
+        tickZone(regular, 0.1, 42.0, 15);
+    }
+    TEST_ASSERT_TRUE(regular.phase == ZonePhase::Cleared);
+    TEST_ASSERT_FLOAT_WITHIN(0.001, 42.0, regular.qiRewardPending);
+}
+
+void test_player_defeat_mid_boss_fight_resets_boss_state(void) {
+    ZoneMap m = makeZoneMap(0, 0, true);
+    ZoneState s = startZone(m, 0);
+    s.player.hp = 1; // dies on the enemy's first landed attack
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    TEST_ASSERT_TRUE(s.currentEncounterIsBoss);
+    bool resetDetected = false;
+    for (int i = 0; i < 50; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+        if (s.phase == ZonePhase::Walking) { resetDetected = true; break; }
+    }
+    TEST_ASSERT_TRUE(resetDetected);
+    TEST_ASSERT_FALSE(s.currentEncounterIsBoss);
+    TEST_ASSERT_FALSE(s.bossEnraged);
+    TEST_ASSERT_FLOAT_WITHIN(0.001, 0.0, s.qiRewardPending);
+}
+
+// Simulation-style balance check, mirroring the existing clearedOnFirstAttemptCount helper below
+// but for boss zones. A boss is deliberately harder than a regular zone (~100% clear rate) but
+// still meant to be beatable most of the time, not a wall - targets roughly 70-80%. If either of
+// the next two tests fails once real numbers are in, retune kBossBaseHp/kBossHpPerRealm/
+// kBossBaseDamage/kBossDamagePerRealm (zone_map.cpp) or kBossEnrageCooldownMultiplier (below) -
+// not these tests - until back in range.
+int bossClearedOnFirstAttemptCount(int realm, int trials) {
+    int cleared = 0;
+    for (int seed = 0; seed < trials; ++seed) {
+        ZoneState s = startZone(makeZoneMap(realm, seed, /*isBossZone=*/true), realm, seed);
+        for (int i = 0; i < 5000 && s.phase != ZonePhase::Cleared && s.zoneRunIndex == seed; ++i) {
+            tickZone(s, 0.1, 42.0, realm);
+        }
+        if (s.phase == ZonePhase::Cleared && s.zoneRunIndex == seed) cleared++;
+    }
+    return cleared;
+}
+
+void test_boss_zone_clear_rate_is_challenging_but_reasonable_at_low_realm(void) {
+    constexpr int kTrials = 30;
+    int cleared = bossClearedOnFirstAttemptCount(1, kTrials);
+    TEST_ASSERT_TRUE(cleared >= kTrials * 7 / 10);
+}
+
+void test_boss_zone_clear_rate_is_challenging_but_reasonable_at_high_realm(void) {
+    constexpr int kTrials = 30;
+    int cleared = bossClearedOnFirstAttemptCount(15, kTrials);
+    TEST_ASSERT_TRUE(cleared >= kTrials * 7 / 10);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_start_zone_begins_walking_at_arena_start);
@@ -570,5 +704,13 @@ int main(int argc, char** argv) {
     RUN_TEST(test_skill_round_robins_among_unlocked_skills_in_zone);
     RUN_TEST(test_skill_and_defeat_on_same_tick_transitions_to_walking);
     RUN_TEST(test_restart_zone_resets_skill_state);
+    RUN_TEST(test_is_boss_zone_for_run_index_matches_every_third_loop);
+    RUN_TEST(test_restart_zone_builds_a_boss_zone_on_the_right_loop);
+    RUN_TEST(test_boss_enrage_triggers_once_at_half_hp);
+    RUN_TEST(test_boss_defeat_grants_bonus_reward_and_flags_the_tick);
+    RUN_TEST(test_boss_zone_total_reward_is_double_a_regular_zones);
+    RUN_TEST(test_player_defeat_mid_boss_fight_resets_boss_state);
+    RUN_TEST(test_boss_zone_clear_rate_is_challenging_but_reasonable_at_low_realm);
+    RUN_TEST(test_boss_zone_clear_rate_is_challenging_but_reasonable_at_high_realm);
     return UNITY_END();
 }
