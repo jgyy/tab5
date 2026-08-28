@@ -363,6 +363,11 @@ void test_skill_round_robins_among_unlocked_skills_in_zone(void) {
     int fired[6] = {-1, -1, -1, -1, -1, -1};
     int count = 0;
     for (int i = 0; i < 300 && count < 6; ++i) { // 30s of simulated fighting, generous headroom
+        s.player.hp = s.player.maxHp; // top off every tick - only the skill cycle is under test
+                                       // here, and a realm-4 enemy's autoattacks (20 dmg every
+                                       // 1.2s) would otherwise kill a 260-hp player well before
+                                       // 30s elapse, triggering restartZone() and resetting the
+                                       // cycle mid-test
         tickZone(s, 0.1, 10.0, 4);
         if (s.skillFiredThisTick >= 0) { fired[count++] = s.skillFiredThisTick; }
     }
