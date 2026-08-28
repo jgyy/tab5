@@ -31,9 +31,11 @@ void initHud(M5GFX& display);
 // Draws the full HUD (header bar + stats panel) into offscreen sprites, then pushes each to
 // `display` in one blit apiece. Keeps every redraw atomic on the physical screen - drawing
 // primitives directly to the live display, one at a time, is visible to the eye as
-// partial-redraw flicker. The panel shows: breakthrough progress, player HP, enemy HP (empty
-// when not currently fighting), and monsters-defeated progress - all read-only, driven
-// entirely by automation. There is nothing left to tap anywhere on screen.
+// partial-redraw flicker. The panel is a MapleStory-styled gold/bronze window frame around
+// individually bordered, glossy bars - top to bottom: player HP / enemy HP (empty when not
+// currently fighting) sharing a row, monsters-defeated progress, and breakthrough progress as
+// the thinnest sliver flush against the bottom (this game's analog to Maple's EXP bar) - all
+// read-only, driven entirely by automation. There is nothing left to tap anywhere on screen.
 void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone);
 
 // Compact K/M/B display formatting for Qi-scale numbers (e.g. "2.2M" instead of

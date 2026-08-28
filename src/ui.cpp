@@ -26,15 +26,44 @@ namespace {
 // The panel is a fixed-height strip anchored to the bottom of the screen (not a fraction of
 // it) so the zone view above it gets to be the screen, not half of it: player/enemy HP share
 // one row, and all other stats fill the remaining space in a compact footprint.
-constexpr int kPanelTopPad = 8;
-constexpr int kSectionGap = 6;
-constexpr int kBreakthroughBarHeight = 26;
-constexpr int kHpBarHeight = 28;
-constexpr int kRouteBarHeight = 22;
-constexpr int kPanelHeight = kPanelTopPad
-    + kBreakthroughBarHeight + kSectionGap
+//
+// Styled after MapleStory's status window: a beveled gold/bronze frame around individually
+// bordered, glossy HP/EXP-style bars, with the thinnest bar (Breakthrough, this game's closest
+// analog to an EXP bar) pinned flush to the bottom, matching Maple's HP/MP/EXP stacking order.
+constexpr int kFrameBorder = 3;      // outer bronze border thickness
+constexpr int kFrameRadius = 10;     // outer frame corner radius
+constexpr int kInnerPad = 5;         // gap between the frame's inner edge and the first/last bar
+constexpr int kSideInset = kFrameBorder + kInnerPad; // left/right margin for full-width bars
+constexpr int kSectionGap = 6;       // vertical gap between bar rows
+constexpr int kHalfGap = 8;          // gap between the player/enemy mini-frames sharing a row
+constexpr int kHpBarHeight = 30;
+constexpr int kQuestBarHeight = 24;
+constexpr int kExpBarHeight = 14;    // slim, like Maple's EXP sliver
+constexpr int kBarRadius = 6;        // corner radius for each individual bar's frame
+constexpr int kBarBorder = 2;        // gold border thickness around each individual bar
+constexpr int kPanelHeight = kFrameBorder + kInnerPad
     + kHpBarHeight + kSectionGap
-    + kRouteBarHeight + kPanelTopPad;
+    + kQuestBarHeight + kSectionGap
+    + kExpBarHeight + kInnerPad + kFrameBorder;
+
+// ---- Maple-inspired palette ----
+// Named from real RGB triples via the graphics stack's constexpr color565() rather than
+// hand-computed RGB565 hex, so the intended color is legible directly from the value.
+constexpr uint16_t kBronze = lgfx::color565(120, 85, 35);       // outer frame border
+constexpr uint16_t kGold = lgfx::color565(210, 170, 60);        // per-bar frame border, rivets
+constexpr uint16_t kGoldBright = lgfx::color565(250, 225, 140); // inner bevel highlight line
+constexpr uint16_t kFrameBg = lgfx::color565(24, 18, 12);       // warm near-black frame interior
+constexpr uint16_t kTrackColor = lgfx::color565(35, 28, 20);    // recessed (unfilled) bar track
+constexpr uint16_t kOutlineColor = TFT_BLACK;                   // text drop-shadow/outline
+
+constexpr uint16_t kPlayerHpColor = lgfx::color565(215, 30, 30);   // authentic Maple HP red
+constexpr uint16_t kPlayerHpGloss = lgfx::color565(255, 140, 130);
+constexpr uint16_t kEnemyHpColor = lgfx::color565(130, 15, 60);    // darker maroon so it reads
+constexpr uint16_t kEnemyHpGloss = lgfx::color565(210, 90, 140);   // distinctly from player HP
+constexpr uint16_t kExpColor = lgfx::color565(210, 180, 60);       // Maple EXP-bar yellow
+constexpr uint16_t kExpGloss = lgfx::color565(240, 220, 140);
+constexpr uint16_t kQuestColor = lgfx::color565(50, 160, 165);     // monsters/route progress
+constexpr uint16_t kQuestGloss = lgfx::color565(150, 220, 220);
 } // namespace
 
 int sceneViewportBottom(int screenH) {
@@ -48,9 +77,9 @@ struct Layout {
     int screenH = 0;
     int panelY0 = 0;      // absolute y where the stats panel (below the zone viewport) starts
     int panelH = 0;
-    int breakthroughY = 0;
     int hpY = 0;      // player HP (left half) and enemy HP (right half) share this row
-    int routeY = 0;
+    int questY = 0;   // monsters-defeated progress
+    int expY = 0;     // breakthrough progress, drawn as the bottom-most slim bar (Maple's EXP spot)
 };
 Layout gLayout;
 
@@ -60,19 +89,23 @@ void computeLayout(int screenW, int screenH) {
     gLayout.panelY0 = sceneViewportBottom(screenH);
     gLayout.panelH = screenH - gLayout.panelY0;
 
-    int y = gLayout.panelY0 + kPanelTopPad;
-    gLayout.breakthroughY = y; y += kBreakthroughBarHeight + kSectionGap;
+    int y = gLayout.panelY0 + kFrameBorder + kInnerPad;
     gLayout.hpY = y; y += kHpBarHeight + kSectionGap;
-    gLayout.routeY = y;
+    gLayout.questY = y; y += kQuestBarHeight + kSectionGap;
+    gLayout.expY = y;
 }
 
-Rect breakthroughRect() { return Rect{0, gLayout.breakthroughY, gLayout.screenW, kBreakthroughBarHeight}; }
-Rect hpRowRect() { return Rect{0, gLayout.hpY, gLayout.screenW, kHpBarHeight}; }
-Rect routeRect() { return Rect{0, gLayout.routeY, gLayout.screenW, kRouteBarHeight}; }
+Rect hpRowRect() { return Rect{kSideInset, gLayout.hpY, gLayout.screenW - 2 * kSideInset, kHpBarHeight}; }
+Rect questRect() { return Rect{kSideInset, gLayout.questY, gLayout.screenW - 2 * kSideInset, kQuestBarHeight}; }
+Rect expRect() { return Rect{kSideInset, gLayout.expY, gLayout.screenW - 2 * kSideInset, kExpBarHeight}; }
 
-// Splits a row into two side-by-side halves (e.g. player/enemy HP).
-Rect leftHalf(const Rect& r) { return Rect{r.x, r.y, r.w / 2, r.h}; }
-Rect rightHalf(const Rect& r) { return Rect{r.x + r.w / 2, r.y, r.w - r.w / 2, r.h}; }
+// Splits a row into two side-by-side halves with a gap between them (e.g. player/enemy HP), so
+// each half reads as its own mini-frame rather than one bar cut in two.
+Rect leftHalf(const Rect& r) { int halfW = (r.w - kHalfGap) / 2; return Rect{r.x, r.y, halfW, r.h}; }
+Rect rightHalf(const Rect& r) {
+    int usedW = (r.w - kHalfGap) / 2 + kHalfGap;
+    return Rect{r.x + usedW, r.y, r.w - usedW, r.h};
+}
 
 M5Canvas* gHeaderCanvas = nullptr;
 M5Canvas* gPanelCanvas = nullptr;
@@ -106,25 +139,77 @@ void drawRightAligned(M5Canvas& canvas, const char* text, int xRight, int yCente
     canvas.print(text);
 }
 
-// Draws a two-tone progress bar (filled portion in `fillColor`, unfilled in dark grey) with a
-// left-aligned label overlaid in transparent white text - a solid fg/bg color pair would only
-// match one of the bar's two background colors, so this uses the single-argument
-// setTextColor() (transparent background, only glyph pixels drawn) instead. `fraction` is
-// clamped to [0,1] so a caller passing a raw ratio can't overflow the bar.
-void drawBar(M5Canvas& canvas, const Rect& r, float fraction, uint16_t fillColor, const char* label) {
+// Draws `text` with a 1px black outline (four cardinal offsets in the outline color, then the
+// real text in white on top) instead of a flat fill - the outline uses single-argument
+// setTextColor() (transparent background, only glyph pixels drawn) so each pass only adds
+// pixels rather than blanking the ones before it. This is the pixel-font drop-shadow look
+// MapleStory's UI uses to keep text readable over busy, colorful bar fills.
+void printOutlined(M5Canvas& canvas, const char* text, int x, int y) {
+    canvas.setTextColor(kOutlineColor);
+    canvas.setCursor(x - 1, y); canvas.print(text);
+    canvas.setCursor(x + 1, y); canvas.print(text);
+    canvas.setCursor(x, y - 1); canvas.print(text);
+    canvas.setCursor(x, y + 1); canvas.print(text);
+    canvas.setTextColor(TFT_WHITE);
+    canvas.setCursor(x, y); canvas.print(text);
+}
+
+// Draws the ornate gold/bronze window frame the stats panel sits inside: a bronze outer
+// border, a 1px bright-gold bevel line just inside it, a warm near-black interior, and four
+// small gold corner rivets - a classic MapleStory dialog/status-window treatment. `canvas`
+// is the panel sprite, so coordinates here are panel-local (origin at the panel's own top-left,
+// not the screen's), matching how the rest of this file already draws into it.
+void drawPanelFrame(M5Canvas& canvas) {
+    int w = gLayout.screenW;
+    int h = gLayout.panelH;
+    // fillRoundRect leaves the four corner wedges outside its curve untouched; since this
+    // sprite is reused every frame without otherwise being cleared, skipping this fillScreen
+    // would let stale pixels from whatever was drawn before persist there indefinitely instead
+    // of being deterministically black like the old full-panel fillScreen(TFT_BLACK) guaranteed.
+    canvas.fillScreen(TFT_BLACK);
+    canvas.fillRoundRect(0, 0, w, h, kFrameRadius, kBronze);
+    canvas.drawRoundRect(1, 1, w - 2, h - 2, kFrameRadius > 1 ? kFrameRadius - 1 : 0, kGoldBright);
+    int innerRadius = kFrameRadius > kFrameBorder ? kFrameRadius - kFrameBorder : 0;
+    canvas.fillRoundRect(kFrameBorder, kFrameBorder, w - 2 * kFrameBorder, h - 2 * kFrameBorder,
+                          innerRadius, kFrameBg);
+
+    constexpr int kRivetInset = 7;
+    constexpr int kRivetRadius = 3;
+    canvas.fillCircle(kRivetInset, kRivetInset, kRivetRadius, kGold);
+    canvas.fillCircle(w - kRivetInset, kRivetInset, kRivetRadius, kGold);
+    canvas.fillCircle(kRivetInset, h - kRivetInset, kRivetRadius, kGold);
+    canvas.fillCircle(w - kRivetInset, h - kRivetInset, kRivetRadius, kGold);
+}
+
+// Draws one MapleStory-style stat bar: a gold-bordered rounded frame around a dark recessed
+// track, a glossy colored fill (a lighter highlight band across the top third fakes the
+// classic HP/MP/EXP sheen), and a black-outlined label overlaid on top. `fraction` is clamped
+// to [0,1] so a caller passing a raw ratio can't overflow the bar. `maxTextSize` is passed per
+// call rather than assumed, since bar heights now range from the slim EXP-style sliver up to
+// the taller HP row - a size that fits the tall bars would overflow the thin one.
+void drawBar(M5Canvas& canvas, const Rect& r, float fraction, uint16_t fillColor, uint16_t glossColor,
+             const char* label, int maxTextSize) {
     if (fraction < 0.0f) fraction = 0.0f;
     if (fraction > 1.0f) fraction = 1.0f;
     int ly = r.y - gLayout.panelY0;
-    canvas.fillRect(r.x, ly, r.w, r.h, TFT_DARKGREY);
-    int fillW = static_cast<int>(r.w * fraction);
-    if (fillW > 0) canvas.fillRect(r.x, ly, fillW, r.h, fillColor);
-    // Bars used to only ever span the full panel width; now player/enemy HP each get a
-    // half-width bar (see hpRowRect() in drawHud()), so - like the other label helpers above -
-    // this needs to shrink the text to fit rather than assume it always will.
-    fitTextSize(canvas, label, r.w - 24, 2);
-    canvas.setTextColor(TFT_WHITE);
-    canvas.setCursor(r.x + 12, ly + (r.h - canvas.fontHeight()) / 2);
-    canvas.print(label);
+
+    canvas.fillRoundRect(r.x, ly, r.w, r.h, kBarRadius, kGold);
+    int tx = r.x + kBarBorder;
+    int ty = ly + kBarBorder;
+    int tw = r.w - 2 * kBarBorder;
+    int th = r.h - 2 * kBarBorder;
+    int fillRadius = kBarRadius > kBarBorder ? kBarRadius - kBarBorder : 0;
+    canvas.fillRoundRect(tx, ty, tw, th, fillRadius, kTrackColor);
+
+    int fillW = static_cast<int>(tw * fraction);
+    if (fillW > 0) {
+        canvas.fillRoundRect(tx, ty, fillW, th, fillRadius, fillColor);
+        int glossH = th / 3;
+        if (glossH > 0) canvas.fillRoundRect(tx, ty, fillW, glossH, fillRadius, glossColor);
+    }
+
+    fitTextSize(canvas, label, tw - 16, maxTextSize);
+    printOutlined(canvas, label, tx + 8, ty + (th - canvas.fontHeight()) / 2);
 }
 
 void drawHeader(M5GFX& display, const GameState& state) {
@@ -180,20 +265,11 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
     drawHeader(display, state);
 
     M5Canvas& panel = *gPanelCanvas;
-    panel.fillScreen(TFT_BLACK);
+    drawPanelFrame(panel);
 
-    float breakthroughFraction = 1.0f;
-    char btLabel[40];
-    if (state.realmIndex < NUM_REALMS - 1) {
-        breakthroughFraction =
-            static_cast<float>(state.qi / REALM_QI_THRESHOLD[state.realmIndex + 1]);
-        snprintf(btLabel, sizeof(btLabel), "Breakthrough %d%%",
-                 static_cast<int>(breakthroughFraction * 100));
-    } else {
-        snprintf(btLabel, sizeof(btLabel), "Max Realm Reached");
-    }
-    drawBar(panel, breakthroughRect(), breakthroughFraction, TFT_ORANGE, btLabel);
-
+    // Row order (top to bottom) now mirrors MapleStory's HP/MP/EXP stacking: the HP row first,
+    // the monsters/route quest-style progress next, and Breakthrough - this game's closest
+    // analog to an EXP bar - last, as the thinnest sliver flush against the bottom.
     Rect hpRow = hpRowRect();
 
     float playerFraction = zone.player.maxHp > 0
@@ -201,7 +277,7 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
         : 0.0f;
     char playerLabel[32];
     snprintf(playerLabel, sizeof(playerLabel), "Player HP %d/%d", zone.player.hp, zone.player.maxHp);
-    drawBar(panel, leftHalf(hpRow), playerFraction, TFT_GREEN, playerLabel);
+    drawBar(panel, leftHalf(hpRow), playerFraction, kPlayerHpColor, kPlayerHpGloss, playerLabel, 2);
 
     bool fighting = (zone.phase == ZonePhase::Fighting);
     float enemyFraction = (fighting && zone.enemy.maxHp > 0)
@@ -213,7 +289,7 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
     } else {
         snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP --");
     }
-    drawBar(panel, rightHalf(hpRow), enemyFraction, TFT_RED, enemyLabel);
+    drawBar(panel, rightHalf(hpRow), enemyFraction, kEnemyHpColor, kEnemyHpGloss, enemyLabel, 2);
 
     int totalMonsters = static_cast<int>(zone.map.monsters.size());
     int defeatedCount = 0;
@@ -228,7 +304,19 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
     } else {
         snprintf(monstersLabel, sizeof(monstersLabel), "Monsters %d/%d", defeatedCount, totalMonsters);
     }
-    drawBar(panel, routeRect(), monstersFraction, TFT_CYAN, monstersLabel);
+    drawBar(panel, questRect(), monstersFraction, kQuestColor, kQuestGloss, monstersLabel, 2);
+
+    float breakthroughFraction = 1.0f;
+    char btLabel[40];
+    if (state.realmIndex < NUM_REALMS - 1) {
+        breakthroughFraction =
+            static_cast<float>(state.qi / REALM_QI_THRESHOLD[state.realmIndex + 1]);
+        snprintf(btLabel, sizeof(btLabel), "Breakthrough %d%%",
+                 static_cast<int>(breakthroughFraction * 100));
+    } else {
+        snprintf(btLabel, sizeof(btLabel), "Max Realm Reached");
+    }
+    drawBar(panel, expRect(), breakthroughFraction, kExpColor, kExpGloss, btLabel, 1);
 
     panel.pushSprite(0, gLayout.panelY0);
 }
