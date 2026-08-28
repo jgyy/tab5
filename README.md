@@ -198,6 +198,68 @@ this one enemy" test instead of chip damage accumulating across a whole run. Tog
 restore roughly the original ~100% first-attempt clear rate at every realm from 1 to 15 (measured
 by simulation), instead of the 10-57% collapse an early version of this change had introduced.
 
+### Boss Encounters
+
+Every third loop of the zone (`kBossZoneInterval` in `lib/core/zone_state.h`, so `zoneRunIndex`
+2, 5, 8, …; the very first zone of a session is never one) is a dedicated **boss zone**. Its
+terrain rolls exactly as any other zone's does — still 3-5 elevated platforms, still reshuffled
+per loop — but the normal per-platform monster roster is replaced by a single boss standing at
+the midpoint of the zone's last elevated platform, and every other platform is empty. The route
+to it is therefore the same walk/jump machinery as always; only what waits at the end changes.
+
+The boss has its own silhouette rather than one of the three regular tiers: a body larger than
+even the toughest tier's, in its own darker, more saturated per-realm `bossColor()`, wearing a
+five-spike gold crown whose spikes are anchored on the body's own circle (`baseY = cy -
+sqrt(r² - dx²)`) so they hug the dome instead of floating beside it. The zone view reserves
+enough headroom for that full sprite (`kTopMarginPx` is derived from the boss's own maximum
+height, 122px, not guessed separately) so a boss on a tall platform can't have its crown clipped
+off the top of the viewport. While a boss fight is live the enemy stat bar relabels itself
+`BOSS HP n/n` and swaps to its own alarming fill/gloss colors.
+
+Its one mechanic is a **one-time enrage**: the first tick the boss drops to half HP or below, its
+attack cooldown is multiplied by `kBossEnrageCooldownMultiplier` (0.7, so ~43% faster swings) and
+latches — a boss never heals, so it can never re-trigger. That moment fires a red flash on the
+boss, a screen shake more than twice a skill impact's, and a harsh low-to-high snarl. Killing the
+boss stages a **bonus Qi reward equal to the zone's own clear reward**, so a boss zone pays out
+roughly double a regular zone's Qi (the bonus at the kill, then the normal clear reward moments
+later once the character walks to the last ledge), and triggers its own expanding red/gold
+ring-and-rays burst plus a short fanfare, deliberately distinct from both the zone-clear jingle
+and the realm-breakthrough celebration. Losing to a boss costs nothing but time, same as every
+other defeat here: the zone restarts from the beginning with the staged bonus discarded.
+
+Boss HP/damage (`kBossBaseHp`/`kBossHpPerRealm`/`kBossBaseDamage`/`kBossDamagePerRealm` in
+`lib/core/zone_map.cpp`) were tuned by simulation, not by inspection — the first-pass numbers made
+the fight unwinnable at every realm. The tuned boss is an endurance test rather than a burst
+threat: roughly 4x a matched-realm top-tier monster's HP (a ~12-22s fight instead of a regular
+~3-5s one) at well below a regular monster's per-hit damage. Note that combat here is fully
+deterministic (no RNG anywhere, and stats key off `realmIndex` only), so the seed-sweep clear-rate
+tests in `test/test_zone_state/` measure "winnable at this realm" all-or-nothing, not a true
+clear-rate distribution — realms 0, 1 and 15 are each pinned as winnable on the first attempt.
+
+Wiring the boss FX into the game loop also turned up a pre-existing bug worth recording. `loop()`
+used to infer "the player just died and the zone restarted" from `player.hp` going *up* across a
+tick — but `tickZone()` full-heals the player on **every** monster kill (added by the platforms
+revamp above), so any kill where the player had taken damage looked identical to a restart and
+silently suppressed that kill's own hit/loot/boss-defeat effects. Measured at realm 5, zero of
+seven regular kills in a zone were observed; for a boss, whose fight always runs long enough to
+take damage, it was 100% of kills at every realm, so the boss defeat FX/SFX above were dead code
+as first merged. The per-tick event derivation now lives in `lib/core/zone_events.{h,cpp}` as a
+pure `deriveZoneTickEvents(before, after, …)` function keyed off `zoneRunIndex` (which only
+`restartZone()` ever bumps) instead of the HP heuristic — and, being in `lib/core/` rather than
+`src/`, it is finally unit-testable, which is precisely why the original bug survived six task
+reviews unnoticed.
+
+**Known limitation — not yet validated on real hardware.** The boss silhouette, crown geometry,
+HUD treatment, enrage/defeat FX, and both new SFX are unflashed: the esp32p4_pioarduino build
+compiles and links successfully in this environment, but nothing here has been seen or heard on a
+physical Tab5, and the balance numbers come from native simulation rather than play. The boss
+difficulty curve is also known to run slightly backward — a realm-0 player finishes at ~20% HP
+while a realm-15 player finishes at ~51%, because `kBossHpPerRealm` doesn't keep pace with player
+DPS growth — which is a deliberate follow-up tuning pass, not a defect in the mechanic.
+
+Design spec: `docs/superpowers/specs/2026-08-28-boss-encounters-design.md`
+Implementation plan: `docs/superpowers/plans/2026-08-28-boss-encounters.md`
+
 ### Settings: brightness & volume
 
 Two full specs' worth of investigation never found a confirmed root cause for the brightness/
@@ -227,9 +289,9 @@ python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200
 Game logic (3D vector/matrix math, the idle-game economy, save serialization and its
 v1->v2 migration, offline-earnings math, HUD hit-testing, the MapleStory-style zone's
 terrain generation, jump arc, patrol motion, combat resolution, procedural textures, and
-autoplay state machine, brightness/volume clamping, the character skill kit, and its FX
-curves) is hardware-agnostic C++ under
-`lib/core/`, unit-tested on the host machine — no device required. 153 test cases across 14
+autoplay state machine, per-tick combat event derivation, brightness/volume clamping, the
+character skill kit, and its FX curves) is hardware-agnostic C++ under
+`lib/core/`, unit-tested on the host machine — no device required. 177 test cases across 15
 suites, all passing:
 
 ```bash
@@ -248,8 +310,10 @@ flashes across this project with zero panic/crash/watchdog signatures.
   `offline_earnings` (the idle-game loop and persistence, including the v1->v2 save
   migration), `zone_map`/`zone_combat`/`zone_state`/`zone_textures` (the MapleStory-style
   zone's terrain generation, combat resolution, autoplay state machine, and procedural
-  colors), `settings` (brightness/volume clamping), `skills` (realm-gated automatic combat
-  skills), `fx` (pure shake/damage-number/parallax curves for zone_view).
+  colors), `zone_events` (the pure before/after diff that turns one `tickZone()` call into the
+  discrete hit/kill/enrage/restart events `main.cpp` fires FX and SFX off), `settings`
+  (brightness/volume clamping), `skills` (realm-gated automatic combat skills), `fx` (pure
+  shake/damage-number/parallax curves for zone_view).
 - `src/` — Arduino/M5Unified/M5GFX glue: `main.cpp` (setup/loop, the 50ms game tick,
   automation, and driving the always-on zone view — there's no `ViewMode` switch anymore,
   just the one screen), `ui.h`/`ui.cpp` (header and stats panel layout and drawing; no
