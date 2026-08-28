@@ -5,9 +5,9 @@
 #include "rtc_store.h"
 #include "offline_earnings.h"
 #include "ui.h"
-#include "trial_map.h"
-#include "trial_state.h"
-#include "trial_view.h"
+#include "zone_map.h"
+#include "zone_state.h"
+#include "zone_view.h"
 #include "settings.h"
 
 namespace {
@@ -28,11 +28,11 @@ constexpr uint32_t kHudRedrawIntervalMs = 300; // ~3Hz when idle
 constexpr int64_t kRtcFallbackEpochSeconds = 1787844399;
 
 GameState gState;
-TrialState gTrialState;
+ZoneState gZoneState;
 uint32_t gLastTickMs = 0;
 uint32_t gLastAutosaveMs = 0;
 uint32_t gLastHudDrawMs = 0;
-uint32_t gLastTrialTickMs = 0;
+uint32_t gLastZoneTickMs = 0;
 
 uint8_t gBrightness = kMaxBrightness;
 uint8_t gVolume = kMaxVolume / 2;
@@ -48,7 +48,7 @@ void setup() {
     M5.begin(cfg);
     Serial.begin(115200);
     delay(200);
-    Serial.println("[BOOT] Secret Realm starting");
+    Serial.println("[BOOT] Zone starting");
 
     M5.Display.fillScreen(TFT_BLACK);
 
@@ -94,16 +94,16 @@ void setup() {
     M5.Speaker.setVolume(gVolume);
 
     initHud(M5.Display);
-    initTrialView(M5.Display);
+    initZoneView(M5.Display);
 
-    // The trial starts immediately and runs forever - there's no other screen to enter it
+    // The zone starts immediately and runs forever - there's no other screen to enter it
     // from anymore, and no unlock gate: even a fresh realm-0 character autoplays from boot,
     // consistent with "a weak cultivator can genuinely lose" already being the intended design.
-    gTrialState = startTrial(makeSecretRealmMap(), gState.realmIndex);
+    gZoneState = startZone(makeZoneMap(gState.realmIndex), gState.realmIndex);
 
     gLastTickMs = millis();
     gLastAutosaveMs = millis();
-    gLastTrialTickMs = millis();
+    gLastZoneTickMs = millis();
     saveNow();
 
     Serial.println("[BOOT] Ready");
@@ -171,46 +171,46 @@ void loop() {
         gLastAutosaveMs = now;
     }
 
-    uint32_t nowTrial = millis();
-    double dt = (nowTrial - gLastTrialTickMs) / 1000.0;
-    gLastTrialTickMs = nowTrial;
+    uint32_t nowZone = millis();
+    double dt = (nowZone - gLastZoneTickMs) / 1000.0;
+    gLastZoneTickMs = nowZone;
 
     // Reward scales with the Qi needed for the player's *next* breakthrough (or stays
     // at the final realm's own threshold once there's no next realm), so clearing the
-    // trial is always worth a meaningful fraction of "how far you have left to go."
+    // zone is always worth a meaningful fraction of "how far you have left to go."
     int nextRealm = (gState.realmIndex < NUM_REALMS - 1) ? gState.realmIndex + 1 : gState.realmIndex;
     double reward = REALM_QI_THRESHOLD[nextRealm] * 0.05;
-    TrialPhase phaseBefore = gTrialState.phase;
-    bool wasFighting = (phaseBefore == TrialPhase::Fighting);
-    int enemyHpBefore = gTrialState.enemy.hp;
-    int playerHpBefore = gTrialState.player.hp;
+    ZonePhase phaseBefore = gZoneState.phase;
+    bool wasFighting = (phaseBefore == ZonePhase::Fighting);
+    int enemyHpBefore = gZoneState.enemy.hp;
+    int playerHpBefore = gZoneState.player.hp;
 
-    tickTrial(gTrialState, dt, reward, gState.realmIndex);
+    tickZone(gZoneState, dt, reward, gState.realmIndex);
 
-    if (wasFighting && gTrialState.enemy.hp < enemyHpBefore) playAttackSfx();
-    if (wasFighting && gTrialState.player.hp < playerHpBefore) playHitSfx();
+    if (wasFighting && gZoneState.enemy.hp < enemyHpBefore) { playAttackSfx(); triggerAttackFlash(); }
+    if (wasFighting && gZoneState.player.hp < playerHpBefore) { playHitSfx(); triggerHitFlash(); }
 
-    if (phaseBefore != TrialPhase::Cleared && gTrialState.phase == TrialPhase::Cleared) {
+    if (phaseBefore != ZonePhase::Cleared && gZoneState.phase == ZonePhase::Cleared) {
         // Apply the reward exactly once, on the single tick this transition happens
         // (checking qiRewardPending > 0 every frame instead would re-apply it every
-        // frame after, since tickTrial() leaves it set while parked in Cleared).
+        // frame after, since tickZone() leaves it set while parked in Cleared).
         playVictorySfx();
-        gState.qi += gTrialState.qiRewardPending;
+        gState.qi += gZoneState.qiRewardPending;
         saveNow();
-        renderTrialView(M5.Display, gTrialState); // show the raycast frame...
-        drawHud(M5.Display, gState, gTrialState, gBrightness, gVolume); // ...with "Cleared!" in the route bar, before pausing
+        renderZoneView(M5.Display, gZoneState); // show the cleared frame...
+        drawHud(M5.Display, gState, gZoneState, gBrightness, gVolume); // ...with "Cleared!" in the monsters bar, before pausing
         gLastHudDrawMs = now; // this was an explicit/forced draw; keep the throttle in sync
         delay(1500);
-        restartTrial(gTrialState, gState.realmIndex); // resets qiRewardPending to 0.0 and loops back
-        gLastTrialTickMs = millis(); // avoid a huge simulated dt on the next tick from the ~1.7s of
-                                      // delay() above (SFX + the pause) that gLastTrialTickMs doesn't
-                                      // otherwise account for
+        restartZone(gZoneState, gState.realmIndex); // rebuilds the map for the current realm and loops back
+        gLastZoneTickMs = millis(); // avoid a huge simulated dt on the next tick from the ~1.7s of
+                                     // delay() above (SFX + the pause) that gLastZoneTickMs doesn't
+                                     // otherwise account for
     } else {
-        renderTrialView(M5.Display, gTrialState);
+        renderZoneView(M5.Display, gZoneState);
     }
 
     if (now - gLastHudDrawMs >= kHudRedrawIntervalMs) {
-        drawHud(M5.Display, gState, gTrialState, gBrightness, gVolume);
+        drawHud(M5.Display, gState, gZoneState, gBrightness, gVolume);
         gLastHudDrawMs = now;
     }
 }

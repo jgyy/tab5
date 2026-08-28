@@ -1,13 +1,12 @@
 #include "ui.h"
-#include "trial_state.h" // full CombatantState/TrialState definition - see the forward decl note in ui.h
 #include <cstdio>
 #include <cstring>
 #include <cmath>
 
-// Compact display formatting for Qi-scale numbers, which grow into the tens of
-// millions (REALM_QI_THRESHOLD tops out at 27,000,000) — a raw "%.0f" would
-// overflow a bar's label at any reasonable text size. Declared in ui.h (not
-// anonymous-namespace-local) so main.cpp's welcome-back screen can reuse it.
+// Compact display formatting for Qi-scale numbers (REALM_QI_THRESHOLD now tops out at
+// 150,000,000,000,000,000 across 16 realms) — a raw "%.0f" would overflow a bar's label at
+// any reasonable text size. Declared in ui.h (not anonymous-namespace-local) so main.cpp's
+// welcome-back screen can reuse it.
 void formatQi(double v, char* out, size_t outLen) {
     double av = v < 0 ? -v : v;
     const char* sign = v < 0 ? "-" : "";
@@ -175,7 +174,7 @@ void initHud(M5GFX& display) {
     gPanelCanvas->createSprite(gLayout.screenW, gLayout.panelH);
 }
 
-void drawHud(M5GFX& display, const GameState& state, const TrialState& trial,
+void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
              uint8_t brightness, uint8_t volume) {
     if (!gPanelCanvas) initHud(display);
     drawHeader(display, state);
@@ -195,36 +194,39 @@ void drawHud(M5GFX& display, const GameState& state, const TrialState& trial,
     }
     drawBar(panel, breakthroughRect(), breakthroughFraction, TFT_ORANGE, btLabel);
 
-    float playerFraction = trial.player.maxHp > 0
-        ? static_cast<float>(trial.player.hp) / static_cast<float>(trial.player.maxHp)
+    float playerFraction = zone.player.maxHp > 0
+        ? static_cast<float>(zone.player.hp) / static_cast<float>(zone.player.maxHp)
         : 0.0f;
     char playerLabel[32];
-    snprintf(playerLabel, sizeof(playerLabel), "Player HP %d/%d", trial.player.hp, trial.player.maxHp);
+    snprintf(playerLabel, sizeof(playerLabel), "Player HP %d/%d", zone.player.hp, zone.player.maxHp);
     drawBar(panel, playerHpRect(), playerFraction, TFT_GREEN, playerLabel);
 
-    bool fighting = (trial.phase == TrialPhase::Fighting);
-    float enemyFraction = (fighting && trial.enemy.maxHp > 0)
-        ? static_cast<float>(trial.enemy.hp) / static_cast<float>(trial.enemy.maxHp)
+    bool fighting = (zone.phase == ZonePhase::Fighting);
+    float enemyFraction = (fighting && zone.enemy.maxHp > 0)
+        ? static_cast<float>(zone.enemy.hp) / static_cast<float>(zone.enemy.maxHp)
         : 0.0f;
     char enemyLabel[32];
     if (fighting) {
-        snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP %d/%d", trial.enemy.hp, trial.enemy.maxHp);
+        snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP %d/%d", zone.enemy.hp, zone.enemy.maxHp);
     } else {
         snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP --");
     }
     drawBar(panel, enemyHpRect(), enemyFraction, TFT_RED, enemyLabel);
 
-    float routeFraction;
-    char routeLabel[32];
-    if (trial.phase == TrialPhase::Cleared) {
-        routeFraction = 1.0f;
-        snprintf(routeLabel, sizeof(routeLabel), "Cleared!");
+    int totalMonsters = static_cast<int>(zone.map.monsters.size());
+    int defeatedCount = 0;
+    for (bool d : zone.monstersDefeated) { if (d) defeatedCount++; }
+    float monstersFraction = totalMonsters > 0
+        ? static_cast<float>(defeatedCount) / static_cast<float>(totalMonsters)
+        : 0.0f;
+    char monstersLabel[32];
+    if (zone.phase == ZonePhase::Cleared) {
+        monstersFraction = 1.0f;
+        snprintf(monstersLabel, sizeof(monstersLabel), "Cleared!");
     } else {
-        int lastIndex = trial.map.route.size() > 1 ? static_cast<int>(trial.map.route.size()) - 1 : 1;
-        routeFraction = static_cast<float>(trial.currentWaypointIndex) / static_cast<float>(lastIndex);
-        snprintf(routeLabel, sizeof(routeLabel), "Route %d/%d", trial.currentWaypointIndex, lastIndex);
+        snprintf(monstersLabel, sizeof(monstersLabel), "Monsters %d/%d", defeatedCount, totalMonsters);
     }
-    drawBar(panel, routeRect(), routeFraction, TFT_CYAN, routeLabel);
+    drawBar(panel, routeRect(), monstersFraction, TFT_CYAN, monstersLabel);
 
     Rect brRow = brightnessRowRect();
     int brly = brRow.y - gLayout.panelY0;
