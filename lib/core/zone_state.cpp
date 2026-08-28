@@ -102,6 +102,7 @@ float walkTargetXOnCurrentPlatform(const ZoneState& state) {
 } // namespace
 
 void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int currentRealmIndex) {
+    state.skillFiredThisTick = -1; // reset every call - a caller inspects this immediately after
     if (state.phase == ZonePhase::Cleared) return;
 
     if (state.phase == ZonePhase::Walking) {
@@ -161,6 +162,13 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
 
     // Fighting
     tickCombat(state.player, state.enemy, dtSeconds);
+    int firedSkill = tickSkill(state.skill, dtSeconds, currentRealmIndex);
+    if (firedSkill >= 0) {
+        state.skillFiredThisTick = firedSkill;
+        int skillDamage = static_cast<int>(state.player.attackDamage * SKILLS[firedSkill].damageMultiplier);
+        state.enemy.hp -= skillDamage;
+        if (state.enemy.hp < 0) state.enemy.hp = 0;
+    }
     if (isDefeated(state.enemy)) {
         state.monstersDefeated[static_cast<size_t>(state.currentMonsterIndex)] = true;
         state.currentMonsterIndex = -1;

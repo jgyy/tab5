@@ -289,6 +289,105 @@ void test_restart_zone_rebuilds_platform_and_position_state(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, expectedMap.platforms[1].y, s.map.platforms[1].y);
 }
 
+void test_start_zone_resets_skill_state(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, s.skill.timer);
+    TEST_ASSERT_EQUAL_INT(0, s.skill.cycleIndex);
+    TEST_ASSERT_EQUAL_INT(-1, s.skillFiredThisTick);
+}
+
+void test_skill_timer_frozen_while_walking(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0);
+    float timerAtStart = s.skill.timer;
+    tickZone(s, 0.1, 10.0, 0); // still Walking on the first tick of a fresh zone
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Walking);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, timerAtStart, s.skill.timer);
+}
+
+void test_skill_fires_after_cooldown_while_fighting(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    s.enemy.maxHp = 100000;
+    s.enemy.hp = 100000; // keep the fight alive long enough to observe the skill firing
+    bool fired = false;
+    int firedIndex = -1;
+    for (int i = 0; i < 35; ++i) { // 3.5s, past skill 0's 3.0s cooldown
+        tickZone(s, 0.1, 10.0, 0);
+        if (s.skillFiredThisTick >= 0) { fired = true; firedIndex = s.skillFiredThisTick; break; }
+    }
+    TEST_ASSERT_TRUE(fired);
+    TEST_ASSERT_EQUAL_INT(0, firedIndex); // only skill 0 is unlocked at realm 0
+}
+
+void test_skill_does_not_fire_before_cooldown_elapses(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    s.enemy.maxHp = 100000;
+    s.enemy.hp = 100000;
+    for (int i = 0; i < 20; ++i) { // 2.0s, under skill 0's 3.0s cooldown
+        tickZone(s, 0.1, 10.0, 0);
+        TEST_ASSERT_EQUAL_INT(-1, s.skillFiredThisTick);
+    }
+}
+
+void test_skill_bonus_damage_exceeds_plain_attack_damage(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    s.enemy.maxHp = 100000;
+    s.enemy.hp = 100000;
+    int hpBefore = 0;
+    int hpAfter = 0;
+    for (int i = 0; i < 35; ++i) {
+        hpBefore = s.enemy.hp;
+        tickZone(s, 0.1, 10.0, 0);
+        if (s.skillFiredThisTick >= 0) { hpAfter = s.enemy.hp; break; }
+    }
+    int dropped = hpBefore - hpAfter;
+    TEST_ASSERT_TRUE(dropped > s.player.attackDamage); // more than a plain autoattack alone
+}
+
+void test_skill_round_robins_among_unlocked_skills_in_zone(void) {
+    ZoneState s = startZone(makeZoneMap(4), 4); // realm 4 -> 3 unlocked skills (indices 0,1,2)
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 4);
+    }
+    s.enemy.maxHp = 1000000;
+    s.enemy.hp = 1000000;
+    int fired[6] = {-1, -1, -1, -1, -1, -1};
+    int count = 0;
+    for (int i = 0; i < 300 && count < 6; ++i) { // 30s of simulated fighting, generous headroom
+        tickZone(s, 0.1, 10.0, 4);
+        if (s.skillFiredThisTick >= 0) { fired[count++] = s.skillFiredThisTick; }
+    }
+    TEST_ASSERT_EQUAL_INT(6, count);
+    TEST_ASSERT_EQUAL_INT(0, fired[0]);
+    TEST_ASSERT_EQUAL_INT(1, fired[1]);
+    TEST_ASSERT_EQUAL_INT(2, fired[2]);
+    TEST_ASSERT_EQUAL_INT(0, fired[3]);
+    TEST_ASSERT_EQUAL_INT(1, fired[4]);
+    TEST_ASSERT_EQUAL_INT(2, fired[5]);
+}
+
+void test_restart_zone_resets_skill_state(void) {
+    ZoneState s = startZone(makeZoneMap(4), 4);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 4);
+    }
+    s.enemy.maxHp = 100000;
+    s.enemy.hp = 100000;
+    for (int i = 0; i < 40; ++i) tickZone(s, 0.1, 10.0, 4); // let the skill timer/cycle advance
+    restartZone(s, 4);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, s.skill.timer);
+    TEST_ASSERT_EQUAL_INT(0, s.skill.cycleIndex);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_start_zone_begins_walking_at_arena_start);
@@ -316,5 +415,12 @@ int main(int argc, char** argv) {
     RUN_TEST(test_jumping_lands_on_destination_platform);
     RUN_TEST(test_walking_elapsed_seconds_freezes_while_fighting);
     RUN_TEST(test_restart_zone_rebuilds_platform_and_position_state);
+    RUN_TEST(test_start_zone_resets_skill_state);
+    RUN_TEST(test_skill_timer_frozen_while_walking);
+    RUN_TEST(test_skill_fires_after_cooldown_while_fighting);
+    RUN_TEST(test_skill_does_not_fire_before_cooldown_elapses);
+    RUN_TEST(test_skill_bonus_damage_exceeds_plain_attack_damage);
+    RUN_TEST(test_skill_round_robins_among_unlocked_skills_in_zone);
+    RUN_TEST(test_restart_zone_resets_skill_state);
     return UNITY_END();
 }

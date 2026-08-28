@@ -2,6 +2,7 @@
 #include <vector>
 #include "zone_map.h"
 #include "zone_combat.h"
+#include "skills.h"
 
 enum class ZonePhase { Walking, Jumping, Fighting, Cleared };
 
@@ -46,8 +47,8 @@ float patrolRangeForPlatform(const Platform& platform);
 
 struct ZoneState {
     ZoneMap map;
-    float posX = 0.0f;
-    float posY = 0.0f;                    // height above ground baseline, world units
+    float posX = 0.0f;                    // height above ground baseline, world units
+    float posY = 0.0f;
     int currentPlatformIndex = 0;         // which platform posX/posY sit on while Walking
     ZonePhase phase = ZonePhase::Walking;
     JumpArc jump;                         // only meaningful while phase == Jumping
@@ -57,6 +58,8 @@ struct ZoneState {
     CombatantState enemy;
     std::vector<bool> monstersDefeated;
     double qiRewardPending = 0.0;
+    SkillState skill;             // fires only while Fighting; frozen otherwise, like walkingElapsedSeconds
+    int skillFiredThisTick = -1;  // SKILLS[] index fired on the most recent tickZone() call, or -1
 };
 
 // Fresh zone at the arena's start (posX = 0), Walking, player stats derived from realmIndex.
