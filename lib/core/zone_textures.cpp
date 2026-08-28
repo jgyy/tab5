@@ -1,18 +1,10 @@
 #include "zone_textures.h"
+#include "hash.h"
 #include <cstdint>
 #include <cmath>
 
 namespace {
 constexpr float kDegreesPerRealm = 360.0f / 16.0f;
-
-// Deterministic pseudo-random value in [0,1) from two small integers - same technique the
-// deleted trial_textures.cpp used for wall shading (an integer hash, no RNG state).
-float hashValue(int a, int b) {
-    uint32_t h = static_cast<uint32_t>(a) * 374761393u + static_cast<uint32_t>(b) * 668265263u;
-    h = (h ^ (h >> 13)) * 1274126177u;
-    h ^= (h >> 16);
-    return static_cast<float>(h & 0xFFFFFF) / static_cast<float>(0x1000000);
-}
 
 uint8_t toByte(float v) {
     if (v > 1.0f) v = 1.0f;
@@ -51,7 +43,7 @@ RGB zoneGroundColor(int realmIndex) {
 
 RGB monsterColor(int realmIndex, int tierIndex) {
     float t = static_cast<float>(tierIndex) / 2.0f; // 0, 0.5, 1.0 for tiers 0,1,2
-    float hueJitter = (hashValue(realmIndex, tierIndex) - 0.5f) * 20.0f; // +-10 degrees
+    float hueJitter = (hashUnitFloat(realmIndex, tierIndex) - 0.5f) * 20.0f; // +-10 degrees
     float hue = realmHue(realmIndex) + 180.0f + hueJitter; // opposite the background hue
     float value = 0.85f - 0.35f * t;    // darkens with tier
     float saturation = 0.6f + 0.3f * t; // more saturated (angrier) with tier
