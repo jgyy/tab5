@@ -21,31 +21,42 @@ void formatQi(double v, char* out, size_t outLen) {
     }
 }
 
+namespace {
+// ---- Layout tuning ----
+// The panel is a fixed-height strip anchored to the bottom of the screen (not a fraction of
+// it) so the zone view above it gets to be the screen, not half of it: player/enemy HP share
+// one row and brightness/volume share another (each still split into its own -/+ halves) to
+// keep every stat and both settings controls in a compact footprint.
+constexpr int kPanelTopPad = 8;
+constexpr int kSectionGap = 6;
+constexpr int kBreakthroughBarHeight = 26;
+constexpr int kHpBarHeight = 28;
+constexpr int kRouteBarHeight = 22;
+constexpr int kSettingsRowHeight = 48; // unchanged from the old standalone rows - these are the
+                                        // two controls under active hardware-response investigation,
+                                        // so their tap-target height is deliberately not shrunk.
+constexpr int kPanelHeight = kPanelTopPad
+    + kBreakthroughBarHeight + kSectionGap
+    + kHpBarHeight + kSectionGap
+    + kRouteBarHeight + kSectionGap
+    + kSettingsRowHeight + kPanelTopPad;
+} // namespace
+
 int sceneViewportBottom(int screenH) {
-    return kHeaderHeight + (screenH - kHeaderHeight) / 2;
+    return screenH - kPanelHeight;
 }
 
 namespace {
 
-// ---- Layout tuning ----
-constexpr int kPanelTopPad = 12;
-constexpr int kSectionGap = 10;
-constexpr int kBreakthroughBarHeight = 40;
-constexpr int kHpBarHeight = 36;
-constexpr int kRouteBarHeight = 28;
-constexpr int kSettingsRowHeight = 48; // compact: one row each for brightness and volume
-
 struct Layout {
     int screenW = 0;
     int screenH = 0;
-    int panelY0 = 0;      // absolute y where the stats panel (below the raycast viewport) starts
+    int panelY0 = 0;      // absolute y where the stats panel (below the zone viewport) starts
     int panelH = 0;
     int breakthroughY = 0;
-    int playerHpY = 0;
-    int enemyHpY = 0;
+    int hpY = 0;      // player HP (left half) and enemy HP (right half) share this row
     int routeY = 0;
-    int brightnessY = 0;
-    int volumeY = 0;
+    int settingsY = 0; // brightness (left half) and volume (right half) share this row
 };
 Layout gLayout;
 
@@ -57,27 +68,34 @@ void computeLayout(int screenW, int screenH) {
 
     int y = gLayout.panelY0 + kPanelTopPad;
     gLayout.breakthroughY = y; y += kBreakthroughBarHeight + kSectionGap;
-    gLayout.playerHpY = y; y += kHpBarHeight + kSectionGap;
-    gLayout.enemyHpY = y; y += kHpBarHeight + kSectionGap;
+    gLayout.hpY = y; y += kHpBarHeight + kSectionGap;
     gLayout.routeY = y; y += kRouteBarHeight + kSectionGap;
-    gLayout.brightnessY = y; y += kSettingsRowHeight + kSectionGap;
-    gLayout.volumeY = y;
+    gLayout.settingsY = y;
 }
 
 Rect breakthroughRect() { return Rect{0, gLayout.breakthroughY, gLayout.screenW, kBreakthroughBarHeight}; }
-Rect playerHpRect() { return Rect{0, gLayout.playerHpY, gLayout.screenW, kHpBarHeight}; }
-Rect enemyHpRect() { return Rect{0, gLayout.enemyHpY, gLayout.screenW, kHpBarHeight}; }
+Rect hpRowRect() { return Rect{0, gLayout.hpY, gLayout.screenW, kHpBarHeight}; }
 Rect routeRect() { return Rect{0, gLayout.routeY, gLayout.screenW, kRouteBarHeight}; }
-Rect brightnessRowRect() { return Rect{0, gLayout.brightnessY, gLayout.screenW, kSettingsRowHeight}; }
-Rect volumeRowRect() { return Rect{0, gLayout.volumeY, gLayout.screenW, kSettingsRowHeight}; }
+Rect settingsRowRect() { return Rect{0, gLayout.settingsY, gLayout.screenW, kSettingsRowHeight}; }
 
-// Each settings row is one tappable strip split into a left ("-") and right ("+") half,
-// rather than four separate button rects, to keep the panel footprint compact.
+// Splits a row into two side-by-side halves (e.g. player/enemy HP, or brightness/volume),
+// and each settings half further into a left ("-") and right ("+") tappable quadrant.
 Rect leftHalf(const Rect& r) { return Rect{r.x, r.y, r.w / 2, r.h}; }
 Rect rightHalf(const Rect& r) { return Rect{r.x + r.w / 2, r.y, r.w - r.w / 2, r.h}; }
 
 M5Canvas* gHeaderCanvas = nullptr;
 M5Canvas* gPanelCanvas = nullptr;
+
+// See flashSettingsButton()/drawSettingsHalf() - highlights whichever settings half (brightness
+// or volume) was just tapped, as a tap-was-received confirmation independent of the brightness/
+// volume value itself. kSettingsFlashDurationMs is a floor, not the actual on-screen duration:
+// drawHud() only runs on its own throttled cadence (immediately after the tap, then every
+// kHudRedrawIntervalMs while idle - see main.cpp), so the highlight stays visible through
+// whichever of those redraws lands before this expires, which can be up to one redraw interval
+// longer than kSettingsFlashDurationMs itself.
+int gSettingsFlashButton = HUD_BUTTON_NONE;
+uint32_t gSettingsFlashUntilMs = 0;
+constexpr uint32_t kSettingsFlashDurationMs = 400;
 
 // Picks the largest text size in [1, startSize] at which `text` fits within
 // maxWidth (measured with textWidth(), not assumed), sets it on `canvas`, and
@@ -108,6 +126,15 @@ void drawRightAligned(M5Canvas& canvas, const char* text, int xRight, int yCente
     canvas.print(text);
 }
 
+void drawCentered(M5Canvas& canvas, const char* text, int xCenter, int yCenter, int maxWidth, int startSize,
+                   uint16_t fg, uint16_t bg) {
+    fitTextSize(canvas, text, maxWidth, startSize);
+    int w = canvas.textWidth(text);
+    canvas.setTextColor(fg, bg);
+    canvas.setCursor(xCenter - w / 2, yCenter - canvas.fontHeight() / 2);
+    canvas.print(text);
+}
+
 // Draws a two-tone progress bar (filled portion in `fillColor`, unfilled in dark grey) with a
 // left-aligned label overlaid in transparent white text - a solid fg/bg color pair would only
 // match one of the bar's two background colors, so this uses the single-argument
@@ -117,13 +144,34 @@ void drawBar(M5Canvas& canvas, const Rect& r, float fraction, uint16_t fillColor
     if (fraction < 0.0f) fraction = 0.0f;
     if (fraction > 1.0f) fraction = 1.0f;
     int ly = r.y - gLayout.panelY0;
-    canvas.fillRect(0, ly, r.w, r.h, TFT_DARKGREY);
+    canvas.fillRect(r.x, ly, r.w, r.h, TFT_DARKGREY);
     int fillW = static_cast<int>(r.w * fraction);
-    if (fillW > 0) canvas.fillRect(0, ly, fillW, r.h, fillColor);
-    canvas.setTextSize(2);
+    if (fillW > 0) canvas.fillRect(r.x, ly, fillW, r.h, fillColor);
+    // Bars used to only ever span the full panel width; now player/enemy HP each get a
+    // half-width bar (see hpRowRect() in drawHud()), so - like the other label helpers above -
+    // this needs to shrink the text to fit rather than assume it always will.
+    fitTextSize(canvas, label, r.w - 24, 2);
     canvas.setTextColor(TFT_WHITE);
-    canvas.setCursor(12, ly + (r.h - canvas.fontHeight()) / 2);
+    canvas.setCursor(r.x + 12, ly + (r.h - canvas.fontHeight()) / 2);
     canvas.print(label);
+}
+
+// Draws one settings control (brightness or volume) as "-" pinned to its left edge, "+" pinned
+// to its right edge, and the current value centered between them, so the two tappable halves
+// (see hitTestHud()) are visually obvious rather than baked into one run of left-aligned text.
+// Flashes yellow briefly after either half is tapped - see flashSettingsButton() and
+// kSettingsFlashDurationMs's comment for what "briefly" actually bounds.
+void drawSettingsHalf(M5Canvas& canvas, const Rect& r, const char* valueLabel,
+                       int downButton, int upButton, uint32_t nowMs) {
+    int ly = r.y - gLayout.panelY0;
+    bool flashing = nowMs < gSettingsFlashUntilMs
+        && (gSettingsFlashButton == downButton || gSettingsFlashButton == upButton);
+    uint16_t bg = flashing ? TFT_YELLOW : TFT_DARKGREY;
+    canvas.fillRect(r.x, ly, r.w, r.h, bg);
+    int yCenter = ly + r.h / 2;
+    drawLeftAligned(canvas, "-", r.x + 10, yCenter, 24, 2, TFT_WHITE, bg);
+    drawRightAligned(canvas, "+", r.x + r.w - 10, yCenter, 24, 2, TFT_WHITE, bg);
+    drawCentered(canvas, valueLabel, r.x + r.w / 2, yCenter, r.w - 80, 2, TFT_WHITE, bg);
 }
 
 void drawHeader(M5GFX& display, const GameState& state) {
@@ -194,12 +242,14 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
     }
     drawBar(panel, breakthroughRect(), breakthroughFraction, TFT_ORANGE, btLabel);
 
+    Rect hpRow = hpRowRect();
+
     float playerFraction = zone.player.maxHp > 0
         ? static_cast<float>(zone.player.hp) / static_cast<float>(zone.player.maxHp)
         : 0.0f;
     char playerLabel[32];
     snprintf(playerLabel, sizeof(playerLabel), "Player HP %d/%d", zone.player.hp, zone.player.maxHp);
-    drawBar(panel, playerHpRect(), playerFraction, TFT_GREEN, playerLabel);
+    drawBar(panel, leftHalf(hpRow), playerFraction, TFT_GREEN, playerLabel);
 
     bool fighting = (zone.phase == ZonePhase::Fighting);
     float enemyFraction = (fighting && zone.enemy.maxHp > 0)
@@ -211,7 +261,7 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
     } else {
         snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP --");
     }
-    drawBar(panel, enemyHpRect(), enemyFraction, TFT_RED, enemyLabel);
+    drawBar(panel, rightHalf(hpRow), enemyFraction, TFT_RED, enemyLabel);
 
     int totalMonsters = static_cast<int>(zone.map.monsters.size());
     int defeatedCount = 0;
@@ -228,29 +278,34 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
     }
     drawBar(panel, routeRect(), monstersFraction, TFT_CYAN, monstersLabel);
 
-    Rect brRow = brightnessRowRect();
-    int brly = brRow.y - gLayout.panelY0;
-    panel.fillRect(0, brly, brRow.w, brRow.h, TFT_DARKGREY);
-    char brLine[32];
-    snprintf(brLine, sizeof(brLine), "-  Brightness %d%%  +", (brightness * 100) / 255);
-    drawLeftAligned(panel, brLine, 12, brly + brRow.h / 2, brRow.w - 24, 2, TFT_WHITE, TFT_DARKGREY);
+    uint32_t nowMs = millis();
+    Rect settingsRow = settingsRowRect();
 
-    Rect volRow = volumeRowRect();
-    int voly = volRow.y - gLayout.panelY0;
-    panel.fillRect(0, voly, volRow.w, volRow.h, TFT_DARKGREY);
-    char volLine[32];
-    snprintf(volLine, sizeof(volLine), "-  Volume %d%%  +", (volume * 100) / 255);
-    drawLeftAligned(panel, volLine, 12, voly + volRow.h / 2, volRow.w - 24, 2, TFT_WHITE, TFT_DARKGREY);
+    char brLine[16];
+    snprintf(brLine, sizeof(brLine), "Bright %d%%", (brightness * 100) / 255);
+    drawSettingsHalf(panel, leftHalf(settingsRow), brLine,
+                      HUD_BUTTON_BRIGHTNESS_DOWN, HUD_BUTTON_BRIGHTNESS_UP, nowMs);
+
+    char volLine[16];
+    snprintf(volLine, sizeof(volLine), "Vol %d%%", (volume * 100) / 255);
+    drawSettingsHalf(panel, rightHalf(settingsRow), volLine,
+                      HUD_BUTTON_VOLUME_DOWN, HUD_BUTTON_VOLUME_UP, nowMs);
 
     panel.pushSprite(0, gLayout.panelY0);
 }
 
 int hitTestHud(int touchX, int touchY) {
-    Rect brRow = brightnessRowRect();
-    if (rectContains(leftHalf(brRow), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_DOWN;
-    if (rectContains(rightHalf(brRow), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_UP;
-    Rect volRow = volumeRowRect();
-    if (rectContains(leftHalf(volRow), touchX, touchY)) return HUD_BUTTON_VOLUME_DOWN;
-    if (rectContains(rightHalf(volRow), touchX, touchY)) return HUD_BUTTON_VOLUME_UP;
+    Rect settingsRow = settingsRowRect();
+    Rect brightnessHalf = leftHalf(settingsRow);
+    Rect volumeHalf = rightHalf(settingsRow);
+    if (rectContains(leftHalf(brightnessHalf), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_DOWN;
+    if (rectContains(rightHalf(brightnessHalf), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_UP;
+    if (rectContains(leftHalf(volumeHalf), touchX, touchY)) return HUD_BUTTON_VOLUME_DOWN;
+    if (rectContains(rightHalf(volumeHalf), touchX, touchY)) return HUD_BUTTON_VOLUME_UP;
     return HUD_BUTTON_NONE;
+}
+
+void flashSettingsButton(int button) {
+    gSettingsFlashButton = button;
+    gSettingsFlashUntilMs = millis() + kSettingsFlashDurationMs;
 }

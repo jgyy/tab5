@@ -26,10 +26,12 @@ enum HudButton {
 constexpr int kHeaderHeight = 64;
 
 // The y-coordinate, in absolute screen space, where the zone viewport ends and the stats/
-// settings panel begins: the header plus half of whatever screen space remains below it.
-// A function (not a constant) because it depends on the live display height - shared between
-// zone_view.cpp (which sizes its canvas to this range) and ui.cpp (which draws the panel
-// starting here), so the two can never disagree about where the split sits.
+// settings panel begins: screen height minus a fixed, compact panel height (see kPanelHeight
+// in ui.cpp), not a 50/50 split - the zone view is the game, so it gets the screen; the panel
+// is a thin strip of read-only stats plus the brightness/volume controls. A function (not a
+// constant) because it depends on the live display height - shared between zone_view.cpp
+// (which sizes its canvas to this range) and ui.cpp (which draws the panel starting here), so
+// the two can never disagree about where the split sits.
 int sceneViewportBottom(int screenH);
 
 // Must be called once (e.g. from setup()) before the first drawHud() call — allocates the
@@ -49,6 +51,14 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
 
 // Hit-tests a touch point against the brightness/volume rows - the only tappable elements left.
 int hitTestHud(int touchX, int touchY);
+
+// Briefly highlights the just-tapped brightness/volume quadrant (pass one of the
+// HUD_BUTTON_BRIGHTNESS_*/HUD_BUTTON_VOLUME_* ids) on the next drawHud() call or two. Gives
+// immediate visual proof a tap was received and routed to the right control, independent of
+// whether the brightness/volume value itself visibly/audibly took effect - useful for telling
+// apart "touch never registered" from "touch registered but the hardware effect didn't" on
+// real hardware.
+void flashSettingsButton(int button);
 
 // Compact K/M/B display formatting for Qi-scale numbers (e.g. "2.2M" instead of
 // "2200000"); exposed so main.cpp's welcome-back screen can format consistently

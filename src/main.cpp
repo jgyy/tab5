@@ -23,6 +23,14 @@ constexpr uint32_t kAutosaveIntervalMs = 15000;
 // volume taps still feel responsive.
 constexpr uint32_t kHudRedrawIntervalMs = 300; // ~3Hz when idle
 
+// The zone canvas now covers most of the screen (see sceneViewportBottom() in ui.cpp) rather
+// than half of it, so redrawing/pushing it on every single loop() iteration - previously cheap
+// enough not to matter - now moves a lot more pixels than the display can usefully show more
+// often than this. tickZone() below still runs every loop iteration (using the real elapsed
+// dt) so simulation speed/smoothness is unaffected; only how often the result gets pushed to
+// the physical screen is capped.
+constexpr uint32_t kZoneFrameIntervalMs = 33; // ~30fps cap
+
 // readRtcEpochSeconds() returns exactly 0 only for a genuinely never-seeded RTC chip
 // (see rtc_store.h). If that happens, seed it once with a reasonable recent-ish
 // timestamp so future elapsed-time deltas (offline earnings) work from this point
@@ -35,6 +43,7 @@ uint32_t gLastTickMs = 0;
 uint32_t gLastAutosaveMs = 0;
 uint32_t gLastHudDrawMs = 0;
 uint32_t gLastZoneTickMs = 0;
+uint32_t gLastZoneRenderMs = 0;
 
 uint8_t gBrightness = kMaxBrightness;
 uint8_t gVolume = kMaxVolume / 2;
@@ -153,12 +162,16 @@ void loop() {
     if (touch.wasClicked()) {
         int button = hitTestHud(touch.x, touch.y);
         // Diagnostic for the brightness/volume unresponsiveness report: this project's own
-        // vendored M5Unified/M5GFX source was read to rule out a touch/display rotation
-        // mismatch (none found - both are configured identically for the Tab5, offset_rotation
-        // 0 on both) and to confirm main.cpp's M5.Touch usage matches the standard pattern.
-        // No confirmed root cause survived that reading, so this line exists to get real data
-        // on the next hardware flash: does a touch even register (this line printing at all),
-        // and if so, is touch.x/touch.y within the row it should have hit (button != -1)?
+        // vendored M5Unified/M5GFX source was read (twice now) to rule out a touch/display
+        // rotation mismatch, a missing Tab5 backlight-PWM/speaker-codec wiring, and a click-
+        // detection/flick-threshold bug - none found, both the app code and the library's Tab5
+        // bring-up look correct. No confirmed root cause survived either reading, so this line
+        // stays to get real data on the next hardware flash: does a touch even register (this
+        // line printing at all), and if so, is touch.x/touch.y within the row it should have
+        // hit (button != -1)? flashSettingsButton() below adds an on-screen counterpart: if the
+        // tapped quadrant visibly flashes yellow but the brightness/volume never actually
+        // changes, that narrows it from "touch not registering" to "the hardware effect isn't
+        // applying" - two very differently-fixed bugs that look identical from the outside.
         Serial.printf("[TOUCH] raw=(%d,%d) hitTestHud=%d\n", touch.x, touch.y, button);
         bool stateChanged = false;
         if (button == HUD_BUTTON_BRIGHTNESS_DOWN) {
@@ -179,6 +192,7 @@ void loop() {
             stateChanged = true;
         }
         if (stateChanged) {
+            flashSettingsButton(button);
             saveNow();
             gLastHudDrawMs = 0; // force an immediate (unthrottled) HUD redraw this frame
         }
@@ -218,13 +232,15 @@ void loop() {
         renderZoneView(M5.Display, gZoneState); // show the cleared frame...
         drawHud(M5.Display, gState, gZoneState, gBrightness, gVolume); // ...with "Cleared!" in the monsters bar, before pausing
         gLastHudDrawMs = now; // this was an explicit/forced draw; keep the throttle in sync
+        gLastZoneRenderMs = now; // ditto for the zone-frame throttle below
         delay(1500);
         restartZone(gZoneState, gState.realmIndex); // rebuilds the map for the current realm and loops back
         gLastZoneTickMs = millis(); // avoid a huge simulated dt on the next tick from the ~1.7s of
                                      // delay() above (SFX + the pause) that gLastZoneTickMs doesn't
                                      // otherwise account for
-    } else {
+    } else if (nowZone - gLastZoneRenderMs >= kZoneFrameIntervalMs) {
         renderZoneView(M5.Display, gZoneState);
+        gLastZoneRenderMs = nowZone;
     }
 
     if (now - gLastHudDrawMs >= kHudRedrawIntervalMs) {

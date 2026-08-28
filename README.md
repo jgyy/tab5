@@ -36,11 +36,11 @@ to the display once per frame to avoid flicker. Despite the panel being physical
 landscape, M5GFX reports the Tab5's display as 720x1280 (portrait logical coordinates) —
 confirmed by reading the M5GFX source and a live serial print on real hardware — so the
 single screen is laid out as a vertical stack: a thin status header at top, the raycast
-viewport filling the top half of the remaining screen, and a read-only stats/settings
-panel filling the bottom half (breakthrough progress, player/enemy HP, route progress,
-then brightness/volume — the only remaining touch controls), computed at runtime from
-`M5.Display.width()`/`.height()` rather than hardcoded. Held normally in landscape, this
-reads correctly on the physical device. The header bar shows battery percentage and
+viewport filling nearly all of the remaining screen, and a compact, fixed-height
+read-only stats/settings strip anchored to the bottom (breakthrough progress, player/enemy
+HP sharing one row, route progress, then brightness/volume sharing another — the only
+remaining touch controls), computed at runtime from `M5.Display.width()`/`.height()` rather
+than hardcoded. Held normally in landscape, this reads correctly on the physical device. The header bar shows battery percentage and
 charging state (a real reading from `M5.Power`) alongside the current realm name and
 Qi/sec rate; there's deliberately no clock, since without Wi-Fi/NTP there'd be nothing to
 keep it from silently drifting. Long realm names in the header and large Qi/sec and

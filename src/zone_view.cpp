@@ -32,13 +32,27 @@ int screenYFor(float worldY, int groundY) {
     return groundY - static_cast<int>(frac * usableRise);
 }
 
+// realmIndex only changes on a (rare) realm breakthrough, but the background still has to be
+// re-filled every frame regardless (platforms/monsters/the character move, so last frame's
+// pixels underneath them can't just be left alone) - the viewport now covers most of the
+// screen (see sceneViewportBottom() in ui.h), so that's already the single biggest per-frame
+// fill here. Caching the two color565() conversions at least avoids redoing that math on every
+// one of those fills for a value that's almost always unchanged from the last frame.
+int gLastBackgroundRealm = -1;
+uint16_t gSkyColor565 = 0;
+uint16_t gGroundColor565 = 0;
+
 void drawBackground(M5Canvas& canvas, int realmIndex) {
-    RGB sky = zoneSkyColor(realmIndex);
-    RGB ground = zoneGroundColor(realmIndex);
+    if (realmIndex != gLastBackgroundRealm) {
+        RGB sky = zoneSkyColor(realmIndex);
+        RGB ground = zoneGroundColor(realmIndex);
+        gSkyColor565 = canvas.color565(sky.r, sky.g, sky.b);
+        gGroundColor565 = canvas.color565(ground.r, ground.g, ground.b);
+        gLastBackgroundRealm = realmIndex;
+    }
     int groundTop = static_cast<int>(gViewportH * 0.75f);
-    canvas.fillRect(0, 0, gViewportW, groundTop, canvas.color565(sky.r, sky.g, sky.b));
-    canvas.fillRect(0, groundTop, gViewportW, gViewportH - groundTop,
-                     canvas.color565(ground.r, ground.g, ground.b));
+    canvas.fillRect(0, 0, gViewportW, groundTop, gSkyColor565);
+    canvas.fillRect(0, groundTop, gViewportW, gViewportH - groundTop, gGroundColor565);
 }
 
 void drawPlatform(M5Canvas& canvas, int screenX0, int screenX1, int screenY, RGB color) {
