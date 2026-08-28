@@ -14,11 +14,13 @@ namespace {
 constexpr uint32_t kTickIntervalMs = 50;   // 20Hz economy tick
 constexpr uint32_t kAutosaveIntervalMs = 15000;
 // The HUD (header + stats panel) is pushed as two offscreen-sprite blits covering most of a
-// 720x1280 portrait screen, which costs much more per call than the raycast viewport's own
-// blit. It's also just text/bars with no motion of its own, so it doesn't need to redraw at
-// full render-loop rate — throttling it keeps the raycast view's own redraw (every loop
-// iteration, see below) unaffected, while still forcing an immediate redraw right after any
-// touch that actually changes state, so brightness/volume taps still feel responsive.
+// 1280x720 landscape screen (the panel's native hardware orientation is portrait 720x1280;
+// setup() rotates it to landscape for the wide MapleStory-style zone view), which costs much
+// more per call than the raycast viewport's own blit used to. It's also just text/bars with no
+// motion of its own, so it doesn't need to redraw at full render-loop rate — throttling it
+// keeps the zone view's own redraw (every loop iteration, see below) unaffected, while still
+// forcing an immediate redraw right after any touch that actually changes state, so brightness/
+// volume taps still feel responsive.
 constexpr uint32_t kHudRedrawIntervalMs = 300; // ~3Hz when idle
 
 // readRtcEpochSeconds() returns exactly 0 only for a genuinely never-seeded RTC chip
@@ -46,6 +48,14 @@ void saveNow() {
 void setup() {
     auto cfg = M5.config();
     M5.begin(cfg);
+
+    // Rotates the panel from its native portrait orientation to landscape (width() becomes
+    // 1280, height() becomes 720) for the MapleStory-style wide side-view zone. Rotation value
+    // 1 is an unconfirmed guess (M5GFX convention: even rotations are typically a panel's
+    // native orientation, odd rotations are the 90-degree-rotated one) - if the image appears
+    // mirrored or upside-down on real hardware, try 3 instead.
+    M5.Display.setRotation(1);
+
     Serial.begin(115200);
     delay(200);
     Serial.println("[BOOT] Zone starting");
