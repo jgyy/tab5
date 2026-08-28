@@ -180,8 +180,22 @@ void loop() {
 
     tickZone(gZoneState, dt, reward, gState.realmIndex);
 
-    if (wasFighting && gZoneState.enemy.hp < enemyHpBefore) { playAttackSfx(); triggerAttackFlash(); }
-    if (wasFighting && gZoneState.player.hp < playerHpBefore) { playHitSfx(); triggerHitFlash(); }
+    bool enemyHit = wasFighting && gZoneState.enemy.hp < enemyHpBefore;
+    bool skillFired = wasFighting && gZoneState.skillFiredThisTick >= 0;
+    if (enemyHit) {
+        playAttackSfx();
+        triggerAttackFlash();
+        spawnDamageNumber(false, enemyHpBefore - gZoneState.enemy.hp, skillFired ? gZoneState.skillFiredThisTick : -1);
+    }
+    if (skillFired) {
+        triggerSkillFx(gZoneState.skillFiredThisTick);
+        playSkillSfx(gZoneState.skillFiredThisTick);
+    }
+    if (wasFighting && gZoneState.player.hp < playerHpBefore) {
+        playHitSfx();
+        triggerHitFlash();
+        spawnDamageNumber(true, playerHpBefore - gZoneState.player.hp, -1);
+    }
 
     if (phaseBefore != ZonePhase::Cleared && gZoneState.phase == ZonePhase::Cleared) {
         // Apply the reward exactly once, on the single tick this transition happens

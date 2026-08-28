@@ -22,3 +22,20 @@ void triggerHitFlash();
 void playAttackSfx();
 void playHitSfx();
 void playVictorySfx();
+
+// Spawns a floating combat-text number, drawn rising from the player's or the current enemy's
+// position over the next ~700ms then removed outright (no fade - M5Canvas has no real alpha
+// blending). skillIndex is the SKILLS[] index if this damage came from a skill (colors/sizes
+// the number accordingly), or -1 for a plain autoattack hit.
+void spawnDamageNumber(bool onPlayer, int amount, int skillIndex);
+
+// Starts a skill's projectile-travel-then-impact-burst animation (from the character to the
+// current enemy) and a short screen shake. Call once per fired skill, immediately after
+// tickZone() reports one via ZoneState::skillFiredThisTick - do not wait for the next
+// throttled render, for the same reason triggerAttackFlash()/triggerHitFlash() are called
+// eagerly today.
+void triggerSkillFx(int skillIndex);
+
+// Procedural cast chime, pitch scaled by skillIndex so later (stronger) skills sound more
+// dramatic - distinct from the existing single-tone playAttackSfx()/playHitSfx().
+void playSkillSfx(int skillIndex);

@@ -1,6 +1,9 @@
 #include "zone_view.h"
 #include "zone_textures.h"
 #include "ui.h" // kHeaderHeight, sceneViewportBottom() - shared viewport bounds
+#include "skills.h"
+#include "fx.h"
+#include <cstdio>
 
 namespace {
 M5Canvas* gZoneCanvas = nullptr;
@@ -10,6 +13,47 @@ int gViewportH = 0;
 uint32_t gAttackFlashUntilMs = 0; // flash on the monster - player's attack landed
 uint32_t gHitFlashUntilMs = 0;    // flash on the character - enemy's attack landed
 constexpr uint32_t kFlashDurationMs = 150;
+
+// Skill projectile/impact/shake state - triggerSkillFx() latches these, renderZoneView()
+// re-derives the current animation frame from elapsed time every call (position is static
+// during Fighting, same reasoning the pre-existing attack/hit flash already relies on).
+int gSkillFxIndex = -1;
+uint32_t gSkillFxStartMs = 0;
+constexpr uint32_t kSkillTravelMs = 220;
+constexpr uint32_t kSkillImpactMs = 160;
+constexpr uint32_t kSkillFxTotalMs = kSkillTravelMs + kSkillImpactMs;
+constexpr uint32_t kShakeDurationMs = 140;
+constexpr float kShakeAmplitudePx = 5.0f;
+constexpr float kPi = 3.14159265358979323846f;
+
+struct DamageNumber {
+    bool active = false;
+    bool onPlayer = false;
+    int amount = 0;
+    int skillIndex = -1; // -1 = plain autoattack hit
+    uint32_t spawnMs = 0;
+};
+constexpr int kMaxDamageNumbers = 8;
+DamageNumber gDamageNumbers[kMaxDamageNumbers];
+constexpr uint32_t kDamageNumberDurationMs = 700;
+constexpr float kDamageNumberRisePxPerSec = 40.0f;
+
+// Fill/ring color pair for a skill's projectile and impact burst - color-only differentiation
+// (not per-skill unique geometry) keeps this tractable across 8 skill kinds while still
+// visually distinguishing which skill just fired.
+void skillColors(SkillVisual visual, uint16_t& fillColor, uint16_t& ringColor) {
+    switch (visual) {
+        case SkillVisual::Slash:         fillColor = TFT_WHITE;    ringColor = TFT_LIGHTGREY; break;
+        case SkillVisual::Fireball:      fillColor = TFT_ORANGE;   ringColor = TFT_RED;       break;
+        case SkillVisual::FrostShard:    fillColor = TFT_CYAN;     ringColor = TFT_WHITE;     break;
+        case SkillVisual::LightningBolt: fillColor = TFT_YELLOW;   ringColor = TFT_PURPLE;    break;
+        case SkillVisual::VoidSpike:     fillColor = TFT_PURPLE;   ringColor = TFT_MAGENTA;   break;
+        case SkillVisual::PhoenixNova:   fillColor = TFT_ORANGE;   ringColor = TFT_GOLD;      break;
+        case SkillVisual::Earthquake:    fillColor = TFT_BROWN;    ringColor = TFT_OLIVE;     break;
+        case SkillVisual::Starfall:      fillColor = TFT_SKYBLUE;  ringColor = TFT_WHITE;     break;
+        default:                         fillColor = TFT_YELLOW;   ringColor = TFT_ORANGE;    break;
+    }
+}
 
 // Reserve headroom above the tallest possible platform (kMaxPlatformHeight) for its monster's
 // sprite (radius up to 40px below) plus margin, so nothing generated at the height ceiling
@@ -89,10 +133,12 @@ void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, u
     canvas.fillRect(screenX + 1, standY - (bob == 0 ? 4 : 8) - legTuck, 4, 4, TFT_NAVY); // right leg
 }
 
-void drawFlash(M5Canvas& canvas, int screenX, int standY, uint32_t nowMs, uint32_t untilMs) {
+void drawFlash(M5Canvas& canvas, int screenX, int standY, uint32_t nowMs, uint32_t untilMs,
+                int fillRadius = 6, int ringRadius = 10,
+                uint16_t fillColor = TFT_YELLOW, uint16_t ringColor = TFT_ORANGE) {
     if (nowMs >= untilMs) return;
-    canvas.fillCircle(screenX, standY - 20, 6, TFT_YELLOW);
-    canvas.drawCircle(screenX, standY - 20, 10, TFT_ORANGE);
+    canvas.fillCircle(screenX, standY - 20, fillRadius, fillColor);
+    canvas.drawCircle(screenX, standY - 20, ringRadius, ringColor);
 }
 } // namespace
 
@@ -121,6 +167,8 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
         drawPlatform(canvas, sx0, sx1, sy, ledgeColor);
     }
 
+    int currentEnemyScreenX = 0;
+    int currentEnemyScreenY = 0;
     for (size_t i = 0; i < state.map.monsters.size(); ++i) {
         if (state.monstersDefeated[i]) continue;
         bool isCurrent = (state.phase == ZonePhase::Fighting &&
@@ -134,7 +182,11 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
         int my = screenYFor(platform.y, groundY);
         RGB color = monsterColor(state.map.realmIndex, static_cast<int>(i));
         drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent);
-        if (isCurrent) drawFlash(canvas, mx, my, nowMs, gAttackFlashUntilMs);
+        if (isCurrent) {
+            drawFlash(canvas, mx, my, nowMs, gAttackFlashUntilMs);
+            currentEnemyScreenX = mx;
+            currentEnemyScreenY = my;
+        }
     }
 
     int charX = screenXFor(state.posX, state.map.arenaWidth);
@@ -142,7 +194,51 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
     drawCharacter(canvas, charX, charY, state.phase, nowMs);
     if (state.phase == ZonePhase::Fighting) drawFlash(canvas, charX, charY, nowMs, gHitFlashUntilMs);
 
-    canvas.pushSprite(0, kHeaderHeight);
+    uint32_t skillElapsed = nowMs - gSkillFxStartMs;
+    float shakeX = 0.0f;
+    float shakeY = 0.0f;
+    if (gSkillFxIndex >= 0 && skillElapsed < kSkillFxTotalMs) {
+        uint16_t fillColor, ringColor;
+        skillColors(SKILLS[gSkillFxIndex].visual, fillColor, ringColor);
+        if (skillElapsed < kSkillTravelMs) {
+            float t = static_cast<float>(skillElapsed) / static_cast<float>(kSkillTravelMs);
+            int px = charX + static_cast<int>((currentEnemyScreenX - charX) * t);
+            int py = charY + static_cast<int>((currentEnemyScreenY - charY) * t);
+            canvas.fillCircle(px, py - 20, 5, fillColor); // -20 keeps it roughly chest-height
+        } else {
+            drawFlash(canvas, currentEnemyScreenX, currentEnemyScreenY, nowMs,
+                      gSkillFxStartMs + kSkillFxTotalMs, 10, 16, fillColor, ringColor);
+        }
+        if (skillElapsed < kShakeDurationMs) {
+            float shakeT = static_cast<float>(skillElapsed) / static_cast<float>(kShakeDurationMs);
+            shakeX = shakeOffset(shakeT, kShakeAmplitudePx, 0.0f);
+            shakeY = shakeOffset(shakeT, kShakeAmplitudePx, kPi / 2.0f);
+        }
+    }
+
+    for (int i = 0; i < kMaxDamageNumbers; ++i) {
+        DamageNumber& dn = gDamageNumbers[i];
+        if (!dn.active) continue;
+        uint32_t elapsed = nowMs - dn.spawnMs;
+        if (elapsed >= kDamageNumberDurationMs) { dn.active = false; continue; }
+        int baseX = dn.onPlayer ? charX : currentEnemyScreenX;
+        int baseY = dn.onPlayer ? charY : currentEnemyScreenY;
+        float rise = damageNumberRiseOffsetPx(static_cast<float>(elapsed) / 1000.0f, kDamageNumberRisePxPerSec);
+        int drawY = baseY - 30 + static_cast<int>(rise); // -30 starts above the head, not the feet
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", dn.amount);
+        uint16_t color = TFT_WHITE;
+        if (dn.skillIndex >= 0) {
+            uint16_t unusedRing;
+            skillColors(SKILLS[dn.skillIndex].visual, color, unusedRing);
+        }
+        canvas.setTextSize(dn.skillIndex >= 0 ? 3 : 2);
+        canvas.setTextColor(color);
+        canvas.setCursor(baseX - canvas.textWidth(buf) / 2, drawY);
+        canvas.print(buf);
+    }
+
+    canvas.pushSprite(static_cast<int>(shakeX), kHeaderHeight + static_cast<int>(shakeY));
 }
 
 void triggerAttackFlash() {
@@ -167,4 +263,30 @@ void playVictorySfx() {
     M5.Speaker.tone(880.0f, 80);
     delay(90);
     M5.Speaker.tone(1320.0f, 160);
+}
+
+void spawnDamageNumber(bool onPlayer, int amount, int skillIndex) {
+    int slot = -1;
+    for (int i = 0; i < kMaxDamageNumbers; ++i) {
+        if (!gDamageNumbers[i].active) { slot = i; break; }
+    }
+    if (slot < 0) {
+        slot = 0;
+        for (int i = 1; i < kMaxDamageNumbers; ++i) {
+            if (gDamageNumbers[i].spawnMs < gDamageNumbers[slot].spawnMs) slot = i;
+        }
+    }
+    gDamageNumbers[slot] = DamageNumber{true, onPlayer, amount, skillIndex, millis()};
+}
+
+void triggerSkillFx(int skillIndex) {
+    gSkillFxIndex = skillIndex;
+    gSkillFxStartMs = millis();
+}
+
+void playSkillSfx(int skillIndex) {
+    float base = 440.0f + 60.0f * static_cast<float>(skillIndex);
+    M5.Speaker.tone(base, 50);
+    delay(40);
+    M5.Speaker.tone(base * 1.5f, 70);
 }
