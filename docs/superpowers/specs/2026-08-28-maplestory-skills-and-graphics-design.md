@@ -97,6 +97,14 @@ This alone grows the zone viewport by 54px (`kSectionGap + kSettingsRowHeight`
 viewport height from `screenH - kPanelHeight`  — no other layout code
 changes.
 
+`drawHud()`'s `uint8_t brightness, uint8_t volume` parameters are dropped —
+they exist today solely to feed `drawSettingsHalf()`, which no longer
+exists, so keeping them would leave two unused parameters. New signature:
+`void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone);`.
+Both of `main.cpp`'s call sites (the throttled periodic redraw and the
+forced redraw right before the "Cleared!" pause) drop the trailing
+`gBrightness, gVolume` arguments to match.
+
 Kept unchanged: `gBrightness`/`gVolume` globals, `settings.h/.cpp`
 (`clampBrightness`/`clampVolume`), the boot-time load-clamp-apply sequence in
 `setup()` (lines ~110-113 of today's `main.cpp`), and `SaveData`'s
