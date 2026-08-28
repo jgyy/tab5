@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "zone_textures.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -24,27 +25,24 @@ void formatQi(double v, char* out, size_t outLen) {
 namespace {
 // ---- Layout tuning ----
 // The panel is a fixed-height strip anchored to the bottom of the screen (not a fraction of
-// it) so the zone view above it gets to be the screen, not half of it: player/enemy HP share
-// one row, and all other stats fill the remaining space in a compact footprint.
+// it) so the zone view above it gets to be the screen, not a chunk of it: all four stats -
+// player HP, enemy HP, route progress, breakthrough progress - share a single row of equal
+// columns instead of stacking into multiple rows, keeping the panel's footprint (and its bite
+// out of the zone viewport above) as small as a single bar's height.
 //
 // Styled after MapleStory's status window: a beveled gold/bronze frame around individually
-// bordered, glossy HP/EXP-style bars, with the thinnest bar (Breakthrough, this game's closest
-// analog to an EXP bar) pinned flush to the bottom, matching Maple's HP/MP/EXP stacking order.
+// bordered, glossy mini-bars, each with its own small corner rivets and a pixel-art icon
+// (heart/skull/flag/star) ahead of its label so all four stay legible at this narrower width.
 constexpr int kFrameBorder = 3;      // outer bronze border thickness
 constexpr int kFrameRadius = 10;     // outer frame corner radius
-constexpr int kInnerPad = 5;         // gap between the frame's inner edge and the first/last bar
-constexpr int kSideInset = kFrameBorder + kInnerPad; // left/right margin for full-width bars
-constexpr int kSectionGap = 6;       // vertical gap between bar rows
-constexpr int kHalfGap = 8;          // gap between the player/enemy mini-frames sharing a row
-constexpr int kHpBarHeight = 30;
-constexpr int kQuestBarHeight = 24;
-constexpr int kExpBarHeight = 14;    // slim, like Maple's EXP sliver
+constexpr int kInnerPad = 5;         // gap between the frame's inner edge and the bar row
+constexpr int kSideInset = kFrameBorder + kInnerPad; // left/right margin for the full-width row
+constexpr int kColumnGap = 8;        // gap between adjacent columns in the stat row
+constexpr int kNumColumns = 4;       // player HP, enemy HP, route progress, breakthrough
+constexpr int kBarHeight = 32;
 constexpr int kBarRadius = 6;        // corner radius for each individual bar's frame
 constexpr int kBarBorder = 2;        // gold border thickness around each individual bar
-constexpr int kPanelHeight = kFrameBorder + kInnerPad
-    + kHpBarHeight + kSectionGap
-    + kQuestBarHeight + kSectionGap
-    + kExpBarHeight + kInnerPad + kFrameBorder;
+constexpr int kPanelHeight = kFrameBorder + kInnerPad + kBarHeight + kInnerPad + kFrameBorder;
 
 // ---- Maple-inspired palette ----
 // Named from real RGB triples via the graphics stack's constexpr color565() rather than
@@ -77,9 +75,7 @@ struct Layout {
     int screenH = 0;
     int panelY0 = 0;      // absolute y where the stats panel (below the zone viewport) starts
     int panelH = 0;
-    int hpY = 0;      // player HP (left half) and enemy HP (right half) share this row
-    int questY = 0;   // monsters-defeated progress
-    int expY = 0;     // breakthrough progress, drawn as the bottom-most slim bar (Maple's EXP spot)
+    int rowY = 0;         // the single row all four stat columns share
 };
 Layout gLayout;
 
@@ -88,23 +84,20 @@ void computeLayout(int screenW, int screenH) {
     gLayout.screenH = screenH;
     gLayout.panelY0 = sceneViewportBottom(screenH);
     gLayout.panelH = screenH - gLayout.panelY0;
-
-    int y = gLayout.panelY0 + kFrameBorder + kInnerPad;
-    gLayout.hpY = y; y += kHpBarHeight + kSectionGap;
-    gLayout.questY = y; y += kQuestBarHeight + kSectionGap;
-    gLayout.expY = y;
+    gLayout.rowY = gLayout.panelY0 + kFrameBorder + kInnerPad;
 }
 
-Rect hpRowRect() { return Rect{kSideInset, gLayout.hpY, gLayout.screenW - 2 * kSideInset, kHpBarHeight}; }
-Rect questRect() { return Rect{kSideInset, gLayout.questY, gLayout.screenW - 2 * kSideInset, kQuestBarHeight}; }
-Rect expRect() { return Rect{kSideInset, gLayout.expY, gLayout.screenW - 2 * kSideInset, kExpBarHeight}; }
+Rect statRowRect() { return Rect{kSideInset, gLayout.rowY, gLayout.screenW - 2 * kSideInset, kBarHeight}; }
 
-// Splits a row into two side-by-side halves with a gap between them (e.g. player/enemy HP), so
-// each half reads as its own mini-frame rather than one bar cut in two.
-Rect leftHalf(const Rect& r) { int halfW = (r.w - kHalfGap) / 2; return Rect{r.x, r.y, halfW, r.h}; }
-Rect rightHalf(const Rect& r) {
-    int usedW = (r.w - kHalfGap) / 2 + kHalfGap;
-    return Rect{r.x + usedW, r.y, r.w - usedW, r.h};
+// The index-th of kNumColumns equal-width columns across `row`, separated by kColumnGap. The
+// last column absorbs the width left over from integer division so the columns exactly tile
+// the row with no rounding gap at the right edge.
+Rect columnRect(const Rect& row, int index) {
+    int gapTotal = kColumnGap * (kNumColumns - 1);
+    int colW = (row.w - gapTotal) / kNumColumns;
+    int x = row.x + index * (colW + kColumnGap);
+    int w = (index == kNumColumns - 1) ? (row.x + row.w - x) : colW;
+    return Rect{x, row.y, w, row.h};
 }
 
 M5Canvas* gHeaderCanvas = nullptr;
@@ -181,14 +174,67 @@ void drawPanelFrame(M5Canvas& canvas) {
     canvas.fillCircle(w - kRivetInset, h - kRivetInset, kRivetRadius, kGold);
 }
 
+// Which pixel-art glyph drawBar() draws ahead of its label, so all four single-row columns
+// stay identifiable at a glance without relying on reading the (now narrower) text alone.
+enum class IconKind { Heart, Skull, Flag, Star };
+
+// Draws a small ~2*size-wide glyph centered at (cx, cy), entirely with fill primitives - matching
+// how the rest of this codebase draws icon-scale shapes (monster silhouettes, header battery/realm
+// text) rather than depending on a font glyph or imported image being available.
+void drawBarIcon(M5Canvas& canvas, IconKind kind, int cx, int cy, int size) {
+    switch (kind) {
+        case IconKind::Heart: {
+            int lobeR = size / 2;
+            if (lobeR < 1) lobeR = 1;
+            canvas.fillCircle(cx - lobeR, cy - lobeR / 2, lobeR, TFT_WHITE);
+            canvas.fillCircle(cx + lobeR, cy - lobeR / 2, lobeR, TFT_WHITE);
+            canvas.fillTriangle(cx - size, cy - lobeR / 2, cx + size, cy - lobeR / 2, cx, cy + size, TFT_WHITE);
+            break;
+        }
+        case IconKind::Skull: {
+            canvas.fillCircle(cx, cy, size, TFT_WHITE);
+            int eyeOffset = size / 2;
+            if (eyeOffset < 1) eyeOffset = 1;
+            canvas.fillCircle(cx - eyeOffset, cy, 1, TFT_BLACK);
+            canvas.fillCircle(cx + eyeOffset, cy, 1, TFT_BLACK);
+            canvas.fillRect(cx - eyeOffset, cy + eyeOffset, 2 * eyeOffset, 1, TFT_BLACK);
+            break;
+        }
+        case IconKind::Flag: {
+            canvas.drawLine(cx, cy - size, cx, cy + size, TFT_WHITE);
+            canvas.fillTriangle(cx, cy - size, cx + size, cy - size / 2, cx, cy, TFT_WHITE);
+            break;
+        }
+        case IconKind::Star: {
+            int half = size > 1 ? size / 2 : 1;
+            canvas.fillTriangle(cx, cy - size, cx - half, cy, cx + half, cy, TFT_WHITE);
+            canvas.fillTriangle(cx, cy + size, cx - half, cy, cx + half, cy, TFT_WHITE);
+            break;
+        }
+    }
+}
+
+// Width reserved for drawBarIcon() before a bar's label text starts.
+constexpr int kIconAreaWidth = 22;
+
+// Small gold dots at a mini-bar's own four corners, echoing the outer panel frame's rivets at a
+// scale that fits a bar as short as kBarHeight - purely decorative, drawn last so nothing else
+// overdraws them.
+void drawBarRivets(M5Canvas& canvas, int x, int ly, int w, int h) {
+    constexpr int kMiniRivetInset = 3;
+    constexpr int kMiniRivetRadius = 1;
+    canvas.fillCircle(x + kMiniRivetInset, ly + kMiniRivetInset, kMiniRivetRadius, kGoldBright);
+    canvas.fillCircle(x + w - kMiniRivetInset, ly + kMiniRivetInset, kMiniRivetRadius, kGoldBright);
+    canvas.fillCircle(x + kMiniRivetInset, ly + h - kMiniRivetInset, kMiniRivetRadius, kGoldBright);
+    canvas.fillCircle(x + w - kMiniRivetInset, ly + h - kMiniRivetInset, kMiniRivetRadius, kGoldBright);
+}
+
 // Draws one MapleStory-style stat bar: a gold-bordered rounded frame around a dark recessed
 // track, a glossy colored fill (a lighter highlight band across the top third fakes the
-// classic HP/MP/EXP sheen), and a black-outlined label overlaid on top. `fraction` is clamped
-// to [0,1] so a caller passing a raw ratio can't overflow the bar. `maxTextSize` is passed per
-// call rather than assumed, since bar heights now range from the slim EXP-style sliver up to
-// the taller HP row - a size that fits the tall bars would overflow the thin one.
+// classic HP/MP/EXP sheen), an icon identifying the stat, and a black-outlined label overlaid
+// on top. `fraction` is clamped to [0,1] so a caller passing a raw ratio can't overflow the bar.
 void drawBar(M5Canvas& canvas, const Rect& r, float fraction, uint16_t fillColor, uint16_t glossColor,
-             const char* label, int maxTextSize) {
+             const char* label, int maxTextSize, IconKind icon) {
     if (fraction < 0.0f) fraction = 0.0f;
     if (fraction > 1.0f) fraction = 1.0f;
     int ly = r.y - gLayout.panelY0;
@@ -208,14 +254,40 @@ void drawBar(M5Canvas& canvas, const Rect& r, float fraction, uint16_t fillColor
         if (glossH > 0) canvas.fillRoundRect(tx, ty, fillW, glossH, fillRadius, glossColor);
     }
 
-    fitTextSize(canvas, label, tw - 16, maxTextSize);
-    printOutlined(canvas, label, tx + 8, ty + (th - canvas.fontHeight()) / 2);
+    drawBarIcon(canvas, icon, tx + kIconAreaWidth / 2, ty + th / 2, th / 4);
+
+    int labelX = tx + kIconAreaWidth;
+    int labelMaxWidth = tw - kIconAreaWidth - 8;
+    fitTextSize(canvas, label, labelMaxWidth, maxTextSize);
+    printOutlined(canvas, label, labelX, ty + (th - canvas.fontHeight()) / 2);
+
+    drawBarRivets(canvas, r.x, ly, r.w, r.h);
 }
+
+// Radius of the header's circular portrait badge (see drawHeader) - sized to sit comfortably
+// inside kHeaderHeight (64px) with margin above and below.
+constexpr int kPortraitRadius = 22;
+constexpr int kPortraitMargin = 12;
 
 void drawHeader(M5GFX& display, const GameState& state) {
     M5Canvas& hdr = *gHeaderCanvas;
     constexpr uint16_t kHeaderBg = 0x18E3; // dark navy-grey, distinct from the panel's black
     hdr.fillScreen(kHeaderBg);
+
+    int headerCenterY = kHeaderHeight / 2;
+    int portraitCx = kPortraitMargin + kPortraitRadius;
+
+    // Small MapleStory-style character-portrait badge: filled with the same per-realm aura
+    // color the character sprite wears in the zone view (see characterAuraColor()), so the
+    // header visibly reflects "what realm's power am I channeling" at a glance, with a gold
+    // ring to match the panel's frame styling and a bright core to read as a gem/eye, not a
+    // flat dot.
+    RGB aura = characterAuraColor(state.realmIndex);
+    uint16_t auraColor = hdr.color565(aura.r, aura.g, aura.b);
+    hdr.fillCircle(portraitCx, headerCenterY, kPortraitRadius, auraColor);
+    hdr.drawCircle(portraitCx, headerCenterY, kPortraitRadius, kGold);
+    hdr.drawCircle(portraitCx, headerCenterY, kPortraitRadius - 1, kGoldBright);
+    hdr.fillCircle(portraitCx, headerCenterY, kPortraitRadius / 3, TFT_WHITE);
 
     char qiRateStr[24];
     formatQi(qiPerSecond(state), qiRateStr, sizeof(qiRateStr));
@@ -237,11 +309,11 @@ void drawHeader(M5GFX& display, const GameState& state) {
         snprintf(rightBuf, sizeof(rightBuf), "%ld%%%s", static_cast<long>(batteryLevel), charging ? "+" : "");
     }
 
+    int leftTextX = kPortraitMargin + 2 * kPortraitRadius + 10;
     int rightMaxWidth = gLayout.screenW / 4;
-    int leftMaxWidth = gLayout.screenW - rightMaxWidth - 24;
-    int headerCenterY = kHeaderHeight / 2;
+    int leftMaxWidth = gLayout.screenW - rightMaxWidth - leftTextX - 12;
 
-    drawLeftAligned(hdr, leftBuf, 12, headerCenterY, leftMaxWidth, 2, TFT_WHITE, kHeaderBg);
+    drawLeftAligned(hdr, leftBuf, leftTextX, headerCenterY, leftMaxWidth, 2, TFT_WHITE, kHeaderBg);
     drawRightAligned(hdr, rightBuf, gLayout.screenW - 12, headerCenterY, rightMaxWidth, 2, TFT_WHITE, kHeaderBg);
 
     hdr.pushSprite(0, 0);
@@ -267,17 +339,18 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
     M5Canvas& panel = *gPanelCanvas;
     drawPanelFrame(panel);
 
-    // Row order (top to bottom) now mirrors MapleStory's HP/MP/EXP stacking: the HP row first,
-    // the monsters/route quest-style progress next, and Breakthrough - this game's closest
-    // analog to an EXP bar - last, as the thinnest sliver flush against the bottom.
-    Rect hpRow = hpRowRect();
+    // All four stats now share one row of equal columns instead of stacking into multiple
+    // rows - order left to right still mirrors MapleStory's HP/MP/EXP priority: player HP,
+    // enemy HP, route (monsters-defeated) progress, then Breakthrough.
+    Rect row = statRowRect();
 
     float playerFraction = zone.player.maxHp > 0
         ? static_cast<float>(zone.player.hp) / static_cast<float>(zone.player.maxHp)
         : 0.0f;
     char playerLabel[32];
     snprintf(playerLabel, sizeof(playerLabel), "Player HP %d/%d", zone.player.hp, zone.player.maxHp);
-    drawBar(panel, leftHalf(hpRow), playerFraction, kPlayerHpColor, kPlayerHpGloss, playerLabel, 2);
+    drawBar(panel, columnRect(row, 0), playerFraction, kPlayerHpColor, kPlayerHpGloss, playerLabel, 2,
+            IconKind::Heart);
 
     bool fighting = (zone.phase == ZonePhase::Fighting);
     float enemyFraction = (fighting && zone.enemy.maxHp > 0)
@@ -289,7 +362,8 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
     } else {
         snprintf(enemyLabel, sizeof(enemyLabel), "Enemy HP --");
     }
-    drawBar(panel, rightHalf(hpRow), enemyFraction, kEnemyHpColor, kEnemyHpGloss, enemyLabel, 2);
+    drawBar(panel, columnRect(row, 1), enemyFraction, kEnemyHpColor, kEnemyHpGloss, enemyLabel, 2,
+            IconKind::Skull);
 
     int totalMonsters = static_cast<int>(zone.map.monsters.size());
     int defeatedCount = 0;
@@ -304,7 +378,8 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
     } else {
         snprintf(monstersLabel, sizeof(monstersLabel), "Monsters %d/%d", defeatedCount, totalMonsters);
     }
-    drawBar(panel, questRect(), monstersFraction, kQuestColor, kQuestGloss, monstersLabel, 2);
+    drawBar(panel, columnRect(row, 2), monstersFraction, kQuestColor, kQuestGloss, monstersLabel, 2,
+            IconKind::Flag);
 
     float breakthroughFraction = 1.0f;
     char btLabel[40];
@@ -316,7 +391,8 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
     } else {
         snprintf(btLabel, sizeof(btLabel), "Max Realm Reached");
     }
-    drawBar(panel, expRect(), breakthroughFraction, kExpColor, kExpGloss, btLabel, 1);
+    drawBar(panel, columnRect(row, 3), breakthroughFraction, kExpColor, kExpGloss, btLabel, 2,
+            IconKind::Star);
 
     panel.pushSprite(0, gLayout.panelY0);
 }

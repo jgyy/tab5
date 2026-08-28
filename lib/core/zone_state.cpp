@@ -169,11 +169,19 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
         state.enemy.hp -= skillDamage;
         if (state.enemy.hp < 0) state.enemy.hp = 0;
     }
-    if (isDefeated(state.enemy)) {
+    // Player defeat is checked FIRST: tickCombat() can land both attacks in the same call
+    // whenever dtSeconds is large enough to cross both combatants' attack cooldowns at once (a
+    // real occurrence here - see main.cpp's SFX delay() calls, which inflate the next loop()
+    // iteration's dt). If both happened to drop to 0 HP on the same tick, checking the enemy
+    // first would silently credit a win and leave the player's own defeat unhandled - the
+    // character would keep walking/fighting at 0 HP until the next encounter's combat happens
+    // to re-check isDefeated(player) on its own. Checking the player first means a simultaneous
+    // double-KO is always a loss (and restarts the zone), never a masked win.
+    if (isDefeated(state.player)) {
+        restartZone(state, currentRealmIndex);
+    } else if (isDefeated(state.enemy)) {
         state.monstersDefeated[static_cast<size_t>(state.currentMonsterIndex)] = true;
         state.currentMonsterIndex = -1;
         state.phase = ZonePhase::Walking;
-    } else if (isDefeated(state.player)) {
-        restartZone(state, currentRealmIndex);
     }
 }

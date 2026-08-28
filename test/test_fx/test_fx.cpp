@@ -53,6 +53,38 @@ void test_parallax_wrap_x_is_deterministic(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.0001f, a, b);
 }
 
+void test_pulse_envelope_is_zero_at_start(void) {
+    float v = pulseEnvelope(0.0f);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, v);
+}
+
+void test_pulse_envelope_is_zero_at_end(void) {
+    float v = pulseEnvelope(1.0f);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, v);
+}
+
+void test_pulse_envelope_peaks_near_midpoint(void) {
+    float v = pulseEnvelope(0.5f);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 1.0f, v);
+}
+
+void test_pulse_envelope_stays_within_unit_range(void) {
+    for (int i = 0; i <= 100; ++i) {
+        float t = static_cast<float>(i) / 100.0f;
+        float v = pulseEnvelope(t);
+        TEST_ASSERT_TRUE(v >= -0.0001f && v <= 1.0001f);
+    }
+}
+
+void test_pulse_envelope_clamps_out_of_range_input(void) {
+    float belowStart = pulseEnvelope(-0.5f);
+    float atStart = pulseEnvelope(0.0f);
+    float pastEnd = pulseEnvelope(1.5f);
+    float atEnd = pulseEnvelope(1.0f);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, atStart, belowStart);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, atEnd, pastEnd);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_shake_offset_is_zero_at_start);
@@ -63,5 +95,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_damage_number_rise_offset_grows_more_negative_over_time);
     RUN_TEST(test_parallax_wrap_x_stays_within_viewport);
     RUN_TEST(test_parallax_wrap_x_is_deterministic);
+    RUN_TEST(test_pulse_envelope_is_zero_at_start);
+    RUN_TEST(test_pulse_envelope_is_zero_at_end);
+    RUN_TEST(test_pulse_envelope_peaks_near_midpoint);
+    RUN_TEST(test_pulse_envelope_stays_within_unit_range);
+    RUN_TEST(test_pulse_envelope_clamps_out_of_range_input);
     return UNITY_END();
 }

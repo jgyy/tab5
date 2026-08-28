@@ -39,13 +39,17 @@ confirmed by reading the M5GFX source and a live serial print on real hardware �
 single screen is laid out as a vertical stack: a thin status header at top, the raycast
 viewport filling nearly all of the remaining screen, and a compact, fixed-height
 read-only stats strip anchored to the bottom — styled as a MapleStory-style gold/bronze
-window frame around individually bordered, glossy bars: player/enemy HP sharing one row
-(player HP in authentic Maple red), route progress, and breakthrough progress as the
-thinnest sliver flush against the bottom, mirroring Maple's HP/MP/EXP stacking order —
-computed at runtime from `M5.Display.width()`/`.height()`
+window frame around four individually bordered, glossy mini-bars sharing a single row (not
+stacked into multiple rows, to keep the panel's bite out of the viewport above as small as
+possible): player HP (authentic Maple red), enemy HP, route progress, and breakthrough
+progress, left to right. Each mini-bar carries its own small corner rivets and a pixel-art
+icon (heart/skull/flag/star) ahead of its label so all four stay identifiable at this
+narrower per-bar width — computed at runtime from `M5.Display.width()`/`.height()`
 rather than hardcoded. Held normally in landscape, this reads correctly on the physical
-device. The header bar shows battery percentage and
-charging state (a real reading from `M5.Power`) alongside the current realm name and
+device. The header bar shows a small circular portrait badge (filled with the character's
+own per-realm aura color, the same one drawn as a ring around the character in the zone
+view, plus a gold ring border matching the panel's frame styling) alongside battery
+percentage and charging state (a real reading from `M5.Power`) and the current realm name and
 Qi/sec rate; there's deliberately no clock, since without Wi-Fi/NTP there'd be nothing to
 keep it from silently drifting. Long realm names in the header and large Qi/sec and
 offline-earnings figures are handled with measured `textWidth()`-based sizing and compact
@@ -133,16 +137,36 @@ skills don't add any.
 
 Combat now shows floating damage numbers, a skill projectile that travels from the character
 to the current enemy and bursts on impact (color-coded per skill), and a brief screen shake
-reserved for skill impacts. The character has arms, a 4-frame walk cycle, a "casting" pose
-synced to skill fires, and a per-realm aura ring. Monsters get tier-distinct silhouettes
-(round/spiky/winged) instead of a uniform colored circle. The background now drifts with
-parallax clouds/embers/stars (realm-dependent) and deterministic ground texture.
+reserved for skill impacts. The character has arms, a 4-frame walk cycle, and a per-realm aura
+ring. Monsters get tier-distinct silhouettes (round/spiky/winged) instead of a uniform colored
+circle. The background now drifts with parallax clouds/embers/stars (realm-dependent) and
+deterministic ground texture. Platforms are dressed with alternating flickering torches and
+hanging cloth banners: the banner is tinted with the same per-realm hue as the ledge itself
+(so it never clashes with a realm's palette), while the torch's flame deliberately stays a
+fixed warm orange/yellow regardless of realm, so it still reads as fire. Together they make
+the zone feel less like a bare set of ledges and more like a decorated MapleStory
+town/dungeon.
+
+The character no longer repeats the exact same motion every time: its casting pose now varies
+by which skill just fired (`castPoseFor()` in `src/zone_view.cpp`) — a forward lunge for the
+melee slash, a low wide-armed wind-up for the two area-effect skills, and an overhead channel
+for everything else — instead of always raising both arms the same way. Standing and fighting
+between skill casts adds a slow breathing sway instead of freezing solid, and the walk cycle's
+cadence is jittered +-15% per platform (hash-seeded, so it's still deterministic) so an
+autoplaying character crossing many platforms back to back doesn't read as one perfectly
+looping stride forever.
+
+Defeating a monster now pops a brief gold sparkle burst at its last position (reward feedback
+for the kill itself, distinct from the per-hit attack flash/damage number), and ranking up a
+cultivation realm now triggers an expanding gold/white ring-and-rays celebration centered on
+the character plus its own rising fanfare — previously both the kill and the breakthrough were
+visually silent beyond a bar updating.
 
 All of this is procedural M5Canvas drawing — no image or audio assets — consistent with the
-rest of this project. New deterministic math (skill unlock/cycling, shake/rise/parallax
+rest of this project. New deterministic math (skill unlock/cycling, shake/rise/parallax/pulse
 curves) lives in `lib/core/skills.{h,cpp}` and `lib/core/fx.{h,cpp}` and is unit-tested; the
-drawing itself is hardware glue in `src/zone_view.cpp`, unvalidated on real hardware like
-everything else in this project.
+drawing itself is hardware glue in `src/zone_view.cpp` and `src/ui.cpp`, unvalidated on real
+hardware like everything else in this project.
 
 Design spec: `docs/superpowers/specs/2026-08-28-maplestory-skills-and-graphics-design.md`
 Implementation plan: `docs/superpowers/plans/2026-08-28-maplestory-skills-and-graphics.md`

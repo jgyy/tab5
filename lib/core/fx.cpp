@@ -28,3 +28,9 @@ float parallaxWrapX(float seedX, float pxPerSecond, float elapsedSeconds, float 
     if (wrapped < 0.0f) wrapped += viewportW;
     return wrapped;
 }
+
+float pulseEnvelope(float t) {
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return std::sin(t * kPi);
+}

@@ -143,7 +143,18 @@ void loop() {
         // first and greedily spent Qi every tick, it could perpetually keep Qi below the
         // breakthrough threshold. Checking breakthrough first avoids that trap.
         if (canBreakthrough(gState)) {
-            attemptBreakthrough(gState);
+            // Loops rather than one attempt per tick: a large Qi injection (e.g. offline
+            // earnings after a long AFK stretch) can clear several realm thresholds at once,
+            // and playBreakthroughSfx() below blocks for a few hundred ms - spreading that
+            // across many ticks would freeze rendering/input for seconds as it re-enters this
+            // branch tick after tick. Resolving the whole cascade here and celebrating once
+            // keeps the blocking cost bounded to a single fanfare regardless of how many
+            // realms were actually gained.
+            while (canBreakthrough(gState)) {
+                attemptBreakthrough(gState);
+            }
+            triggerRealmBreakthroughFx();
+            playBreakthroughSfx();
         }
         // One purchase attempt per generator per tick (not loop-until-can't-afford) —
         // natural accumulation across many ticks at 20Hz is plenty responsive, and index
@@ -187,10 +198,19 @@ void loop() {
     bool zoneRestarted = wasFighting && gZoneState.player.hp > playerHpBefore;
     bool enemyHit = wasFighting && !zoneRestarted && gZoneState.enemy.hp < enemyHpBefore;
     bool skillFired = wasFighting && gZoneState.skillFiredThisTick >= 0;
+    // tickZone() only ever leaves Fighting for Walking via one of two paths: the enemy was just
+    // defeated, or (zoneRestarted) the player was - excluding the latter leaves exactly "a kill
+    // happened this tick", the same way the enemyHit/skillFired checks above already lean on
+    // exact before/after ZoneState comparisons instead of a dedicated event flag.
+    bool monsterDefeated = wasFighting && !zoneRestarted && gZoneState.phase == ZonePhase::Walking;
     if (enemyHit) {
         if (!skillFired) playAttackSfx(); // skip the plain-hit tone when the skill's own SFX will play this tick
         triggerAttackFlash();
         spawnDamageNumber(false, enemyHpBefore - gZoneState.enemy.hp, skillFired ? gZoneState.skillFiredThisTick : -1);
+    }
+    if (monsterDefeated) {
+        triggerLootPop();
+        playLootSfx();
     }
     if (skillFired) {
         triggerSkillFx(gZoneState.skillFiredThisTick);

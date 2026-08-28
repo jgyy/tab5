@@ -56,6 +56,25 @@ DamageNumber gDamageNumbers[kMaxDamageNumbers];
 constexpr uint32_t kDamageNumberDurationMs = 700;
 constexpr float kDamageNumberRisePxPerSec = 40.0f;
 
+// Monster-kill loot-pop sparkle state - single-slot (not a pool like DamageNumber) because
+// killing a monster always requires walking to the next one first, which takes far longer than
+// this burst's own lifetime; a second kill retriggering it mid-animation is an unreachable edge
+// case, not a corner worth a pool for.
+bool gLootPopActive = false;
+uint32_t gLootPopStartMs = 0;
+constexpr uint32_t kLootPopDurationMs = 500;
+constexpr int kLootPopSparkles = 5;
+constexpr float kLootPopMaxRadiusPx = 22.0f;
+constexpr float kLootPopRisePxPerSec = 24.0f;
+
+// Realm-breakthrough celebration burst state - fires at most once per (rare) realm rank-up, so
+// a single slot is more than enough.
+bool gBreakthroughFxActive = false;
+uint32_t gBreakthroughFxStartMs = 0;
+constexpr uint32_t kBreakthroughFxDurationMs = 800;
+constexpr int kBreakthroughRays = 8;
+constexpr float kBreakthroughMaxRadiusPx = 70.0f;
+
 // Fill/ring color pair for a skill's projectile and impact burst - color-only differentiation
 // (not per-skill unique geometry) keeps this tractable across 8 skill kinds while still
 // visually distinguishing which skill just fired.
@@ -70,6 +89,22 @@ void skillColors(SkillVisual visual, uint16_t& fillColor, uint16_t& ringColor) {
         case SkillVisual::Earthquake:    fillColor = TFT_BROWN;    ringColor = TFT_OLIVE;     break;
         case SkillVisual::Starfall:      fillColor = TFT_SKYBLUE;  ringColor = TFT_WHITE;     break;
         default:                         fillColor = TFT_YELLOW;   ringColor = TFT_ORANGE;    break;
+    }
+}
+
+// Casting-pose "silhouette bucket" for a skill visual - not one unique pose per skill (8 would
+// be a lot of near-duplicate code for little added distinctiveness at this pixel scale), but
+// three broad body languages so casting doesn't look identical every single time: a forward
+// lunge for the melee slash, a low wide-armed slam for the two area-effect skills, and an
+// overhead channel for everything ranged/elemental.
+enum class CastPose { Overhead, Lunge, Slam };
+
+CastPose castPoseFor(SkillVisual visual) {
+    switch (visual) {
+        case SkillVisual::Slash:       return CastPose::Lunge;
+        case SkillVisual::Earthquake:
+        case SkillVisual::PhoenixNova: return CastPose::Slam;
+        default:                       return CastPose::Overhead;
     }
 }
 
@@ -180,6 +215,42 @@ void drawPlatform(M5Canvas& canvas, int screenX0, int screenX1, int screenY, RGB
     canvas.fillRect(screenX0, screenY, screenX1 - screenX0, kLedgeThickness, fill);
 }
 
+// A MapleStory-style town decoration on one platform: alternates a flickering wall torch at the
+// platform's left edge (odd index) with a hanging cloth banner at its right edge (even index).
+// The banner is tinted with the same per-realm platform hue as the ledge itself so it never
+// clashes with a realm's palette; the torch's flame deliberately stays a fixed warm
+// orange/yellow regardless of realm - a flame reads as fire because of its color, and hue-
+// rotating it away from that range per realm would stop it looking like fire at all. Purely
+// cosmetic dressing behind/beside the platform - never blocks the ledge itself, drawn after it
+// in the same loop iteration.
+void drawPlatformDecoration(M5Canvas& canvas, int screenX0, int screenX1, int screenY, int index,
+                             int realmIndex, uint32_t nowMs) {
+    if (index % 2 == 1) {
+        int poleX = screenX0 + 6;
+        int poleTopY = screenY - 16;
+        canvas.drawLine(poleX, screenY, poleX, poleTopY, TFT_DARKGREY);
+        bool bigFlame = ((nowMs / 150) % 2) == 0; // flickers between two sizes, not a static flame
+        int flameH = bigFlame ? 8 : 6;
+        canvas.fillTriangle(poleX - 3, poleTopY, poleX + 3, poleTopY, poleX, poleTopY - flameH, TFT_ORANGE);
+        canvas.fillTriangle(poleX - 1, poleTopY, poleX + 1, poleTopY, poleX, poleTopY - flameH / 2, TFT_YELLOW);
+    } else {
+        RGB ledge = platformColor(realmIndex);
+        // Brightened past the ledge's own color (not an arbitrary fixed hue) so the banner reads
+        // as "cloth catching the light" rather than blending into the platform beneath it.
+        uint8_t clothR = ledge.r > 215 ? 255 : static_cast<uint8_t>(ledge.r + 40);
+        uint8_t clothG = ledge.g > 235 ? 255 : static_cast<uint8_t>(ledge.g + 20);
+        uint8_t clothB = ledge.b > 215 ? 255 : static_cast<uint8_t>(ledge.b + 40);
+        uint16_t cloth = canvas.color565(clothR, clothG, clothB);
+
+        int poleX = screenX1 - 6;
+        int poleTopY = screenY - 18;
+        canvas.drawLine(poleX, screenY, poleX, poleTopY, TFT_DARKGREY);
+        constexpr int kBannerW = 10;
+        constexpr int kBannerH = 12;
+        canvas.fillRect(poleX - kBannerW, poleTopY, kBannerW, kBannerH, cloth);
+    }
+}
+
 void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color, bool isCurrent, int tierIndex) {
     int radius = 10 + maxHp / 15; // bigger monsters read as tougher
     if (radius > 40) radius = 40;
@@ -222,7 +293,8 @@ void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color
     }
 }
 
-void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, uint32_t nowMs, int realmIndex) {
+void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, uint32_t nowMs, int realmIndex,
+                    int platformIndex) {
     constexpr int kBodyHeight = 26;
     constexpr int kHeadRadius = 7;
     constexpr int kAirborneLegTuck = 6; // airborne pose: legs tucked up higher than walk/idle
@@ -232,11 +304,25 @@ void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, u
     bool jumping = (phase == ZonePhase::Jumping);
     bool casting = gSkillFxIndex >= 0 && (nowMs - gSkillFxStartMs) < kCastingPoseMs && phase == ZonePhase::Fighting;
 
+    // Walk cadence is jittered +-15% per platform (hash-seeded, so it's still deterministic and
+    // reproducible, just not identical from platform to platform) so an autoplaying character
+    // covering many platforms back to back doesn't read as one perfectly looping stride forever.
+    float cadenceScale = hashRange(realmIndex, 400 + platformIndex, 0.85f, 1.15f);
+    uint32_t frameMs = static_cast<uint32_t>(100.0f * cadenceScale);
+    if (frameMs < 1) frameMs = 1;
     constexpr int kWalkBobFrames[4] = {0, 1, 2, 1}; // 4-frame walk cycle (was 2-frame)
-    int bob = walking ? kWalkBobFrames[(nowMs / 100) % 4] : 0;
+    int bob = walking ? kWalkBobFrames[(nowMs / frameMs) % 4] : 0;
     int legTuck = jumping ? kAirborneLegTuck : 0;
-    int headY = standY - kBodyHeight - kHeadRadius + bob;
-    int bodyTop = standY - kBodyHeight + bob;
+
+    // A slow breathing sway while standing and fighting (but not mid-cast) - without it, every
+    // autoattack exchange between skill casts left the character as a frozen statue for however
+    // long the fight dragged on. Head/torso only; legs stay planted so this doesn't read as a
+    // (nonexistent) idle shuffle.
+    bool idling = (phase == ZonePhase::Fighting) && !casting;
+    int idleSway = idling ? static_cast<int>(1.5f * std::sin(static_cast<float>(nowMs) / 400.0f)) : 0;
+
+    int headY = standY - kBodyHeight - kHeadRadius + bob + idleSway;
+    int bodyTop = standY - kBodyHeight + bob + idleSway;
     int shoulderY = bodyTop + 4;
 
     RGB aura = characterAuraColor(realmIndex);
@@ -247,9 +333,26 @@ void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, u
     canvas.fillRect(screenX - 5, bodyTop, 10, kBodyHeight, TFT_BLUE);
 
     if (casting) {
-        // Arms raised overhead, synced to a fired skill's opening frames.
-        canvas.drawLine(screenX - 5, shoulderY, screenX - kArmLength, shoulderY - kArmLength, TFT_WHITE);
-        canvas.drawLine(screenX + 5, shoulderY, screenX + kArmLength, shoulderY - kArmLength, TFT_WHITE);
+        // Body language varies by which skill just fired (see castPoseFor) instead of always
+        // raising both arms overhead, so casting doesn't look identical every time it happens.
+        switch (castPoseFor(SKILLS[gSkillFxIndex].visual)) {
+            case CastPose::Overhead:
+                canvas.drawLine(screenX - 5, shoulderY, screenX - kArmLength, shoulderY - kArmLength, TFT_WHITE);
+                canvas.drawLine(screenX + 5, shoulderY, screenX + kArmLength, shoulderY - kArmLength, TFT_WHITE);
+                break;
+            case CastPose::Lunge:
+                // Forward sword-thrust: leading arm straight out toward the enemy, trailing arm
+                // pulled back for balance.
+                canvas.drawLine(screenX + 5, shoulderY, screenX + kArmLength * 2, shoulderY, TFT_WHITE);
+                canvas.drawLine(screenX - 5, shoulderY, screenX - kArmLength, shoulderY + kArmLength / 2, TFT_WHITE);
+                break;
+            case CastPose::Slam:
+                // Low, wide-armed wind-up for the area-effect skills - both arms out and raised
+                // only halfway, distinct from the overhead channel's fully-raised arms.
+                canvas.drawLine(screenX - 5, shoulderY, screenX - kArmLength - 3, shoulderY - kArmLength / 2, TFT_WHITE);
+                canvas.drawLine(screenX + 5, shoulderY, screenX + kArmLength + 3, shoulderY - kArmLength / 2, TFT_WHITE);
+                break;
+        }
     } else {
         canvas.drawLine(screenX - 5, shoulderY, screenX - kArmLength, shoulderY + kArmLength / 2, TFT_WHITE);
         canvas.drawLine(screenX + 5, shoulderY, screenX + kArmLength, shoulderY + kArmLength / 2, TFT_WHITE);
@@ -265,6 +368,55 @@ void drawFlash(M5Canvas& canvas, int screenX, int standY, uint32_t nowMs, uint32
     if (nowMs >= untilMs) return;
     canvas.fillCircle(screenX, standY - 20, fillRadius, fillColor);
     canvas.drawCircle(screenX, standY - 20, ringRadius, ringColor);
+}
+
+// A small burst of gold sparkles that pops up from the last-known enemy position and fades -
+// reward feedback for a kill, since previously a defeated monster just silently disappeared
+// with only the shared attack flash/damage number (which fire on every hit, not just the
+// killing one) to mark the moment.
+void drawLootPop(M5Canvas& canvas, uint32_t nowMs) {
+    if (!gLootPopActive) return;
+    uint32_t elapsed = nowMs - gLootPopStartMs;
+    if (elapsed >= kLootPopDurationMs) { gLootPopActive = false; return; }
+
+    float t = static_cast<float>(elapsed) / static_cast<float>(kLootPopDurationMs);
+    float envelope = pulseEnvelope(t);
+    float radius = kLootPopMaxRadiusPx * t;
+    float rise = damageNumberRiseOffsetPx(static_cast<float>(elapsed) / 1000.0f, kLootPopRisePxPerSec);
+    int baseY = gLastEnemyScreenY - 20 + static_cast<int>(rise);
+
+    for (int i = 0; i < kLootPopSparkles; ++i) {
+        float angle = (2.0f * kPi / static_cast<float>(kLootPopSparkles)) * static_cast<float>(i) - kPi / 2.0f;
+        int sx = gLastEnemyScreenX + static_cast<int>(std::cos(angle) * radius);
+        int sy = baseY + static_cast<int>(std::sin(angle) * radius);
+        int size = 1 + static_cast<int>(2.5f * envelope);
+        canvas.fillCircle(sx, sy, size, TFT_GOLD);
+    }
+}
+
+// An expanding gold/white ring plus radiating rays centered on the character - a one-off
+// celebration for ranking up a cultivation realm, since the breakthrough bar previously just
+// filled up silently with no visual payoff for the moment it actually completes.
+void drawBreakthroughFx(M5Canvas& canvas, int charX, int charY, uint32_t nowMs) {
+    if (!gBreakthroughFxActive) return;
+    uint32_t elapsed = nowMs - gBreakthroughFxStartMs;
+    if (elapsed >= kBreakthroughFxDurationMs) { gBreakthroughFxActive = false; return; }
+
+    float t = static_cast<float>(elapsed) / static_cast<float>(kBreakthroughFxDurationMs);
+    float envelope = pulseEnvelope(t);
+    int cy = charY - 20;
+    int ringRadius = static_cast<int>(kBreakthroughMaxRadiusPx * t);
+
+    canvas.drawCircle(charX, cy, ringRadius, TFT_GOLD);
+    if (ringRadius > 3) canvas.drawCircle(charX, cy, ringRadius - 3, TFT_WHITE);
+
+    int rayLen = ringRadius + static_cast<int>(kBreakthroughMaxRadiusPx * 0.4f * envelope);
+    for (int i = 0; i < kBreakthroughRays; ++i) {
+        float angle = (2.0f * kPi / static_cast<float>(kBreakthroughRays)) * static_cast<float>(i);
+        int ex = charX + static_cast<int>(std::cos(angle) * rayLen);
+        int ey = cy + static_cast<int>(std::sin(angle) * rayLen);
+        canvas.drawLine(charX, cy, ex, ey, TFT_YELLOW);
+    }
 }
 } // namespace
 
@@ -293,6 +445,7 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
         int sx1 = screenXFor(p.x1, state.map.arenaWidth);
         int sy = screenYFor(p.y, groundY);
         drawPlatform(canvas, sx0, sx1, sy, ledgeColor);
+        drawPlatformDecoration(canvas, sx0, sx1, sy, static_cast<int>(i), state.map.realmIndex, nowMs);
     }
 
     for (size_t i = 0; i < state.map.monsters.size(); ++i) {
@@ -317,8 +470,10 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
 
     int charX = screenXFor(state.posX, state.map.arenaWidth);
     int charY = screenYFor(state.posY, groundY);
-    drawCharacter(canvas, charX, charY, state.phase, nowMs, state.map.realmIndex);
+    drawCharacter(canvas, charX, charY, state.phase, nowMs, state.map.realmIndex, state.currentPlatformIndex);
     if (state.phase == ZonePhase::Fighting) drawFlash(canvas, charX, charY, nowMs, gHitFlashUntilMs);
+    drawLootPop(canvas, nowMs);
+    drawBreakthroughFx(canvas, charX, charY, nowMs);
 
     uint32_t skillElapsed = nowMs - gSkillFxStartMs;
     float shakeX = 0.0f;
@@ -415,4 +570,31 @@ void playSkillSfx(int skillIndex) {
     M5.Speaker.tone(base, 50);
     delay(40);
     M5.Speaker.tone(base * 1.5f, 70);
+}
+
+void triggerLootPop() {
+    gLootPopActive = true;
+    gLootPopStartMs = millis();
+}
+
+void playLootSfx() {
+    M5.Speaker.tone(1200.0f, 40);
+}
+
+void triggerRealmBreakthroughFx() {
+    gBreakthroughFxActive = true;
+    gBreakthroughFxStartMs = millis();
+}
+
+void playBreakthroughSfx() {
+    // A distinct rising fanfare (a major-triad arpeggio) so a realm rank-up reads differently
+    // from playVictorySfx()'s zone-clear jingle rather than reusing the same three notes for
+    // two different milestones.
+    M5.Speaker.tone(523.0f, 90);
+    delay(100);
+    M5.Speaker.tone(659.0f, 90);
+    delay(100);
+    M5.Speaker.tone(784.0f, 90);
+    delay(100);
+    M5.Speaker.tone(1046.0f, 220);
 }

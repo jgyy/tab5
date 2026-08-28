@@ -39,3 +39,15 @@ void triggerSkillFx(int skillIndex);
 // Procedural cast chime, pitch scaled by skillIndex so later (stronger) skills sound more
 // dramatic - distinct from the existing single-tone playAttackSfx()/playHitSfx().
 void playSkillSfx(int skillIndex);
+
+// Starts a brief gold sparkle burst at the last-known enemy position - call once per monster
+// kill (main.cpp detects this the same way it already detects enemyHit/skillFired: comparing
+// ZoneState before/after tickZone()), as reward feedback distinct from the per-hit attack flash.
+void triggerLootPop();
+void playLootSfx();
+
+// Starts a brief expanding gold/white ring-and-rays celebration centered on the character -
+// call once per successful realm breakthrough (main.cpp already gates that with
+// canBreakthrough()/attemptBreakthrough()).
+void triggerRealmBreakthroughFx();
+void playBreakthroughSfx();
