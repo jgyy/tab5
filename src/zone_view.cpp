@@ -75,6 +75,23 @@ constexpr uint32_t kBreakthroughFxDurationMs = 800;
 constexpr int kBreakthroughRays = 8;
 constexpr float kBreakthroughMaxRadiusPx = 70.0f;
 
+// Boss enrage flash/shake state - a single trigger call latches both; renderZoneView() derives
+// the current frame from elapsed time, same pattern the skill FX above already uses.
+bool gBossEnrageFxActive = false;
+uint32_t gBossEnrageFxStartMs = 0;
+constexpr uint32_t kBossEnrageFxDurationMs = 260;
+constexpr float kBossEnrageShakeAmplitudePx = 5.0f; // more than double kShakeAmplitudePx's 2.0f -
+                                                     // a bigger jolt for a boss-only event
+
+// Boss defeat celebration burst state - visually similar to the breakthrough celebration above
+// (same expanding-ring-plus-rays technique) but its own state/color so a boss kill never reads
+// as identical to a realm breakthrough.
+bool gBossDefeatFxActive = false;
+uint32_t gBossDefeatFxStartMs = 0;
+constexpr uint32_t kBossDefeatFxDurationMs = 900; // longer than kBreakthroughFxDurationMs's 800ms
+constexpr int kBossDefeatRays = 10;
+constexpr float kBossDefeatMaxRadiusPx = 80.0f;
+
 // Fill/ring color pair for a skill's projectile and impact burst - color-only differentiation
 // (not per-skill unique geometry) keeps this tractable across 8 skill kinds while still
 // visually distinguishing which skill just fired.
@@ -251,12 +268,28 @@ void drawPlatformDecoration(M5Canvas& canvas, int screenX0, int screenX1, int sc
     }
 }
 
-void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color, bool isCurrent, int tierIndex) {
+void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color, bool isCurrent, int tierIndex,
+                  bool isBoss) {
     int radius = 10 + maxHp / 15; // bigger monsters read as tougher
     if (radius > 40) radius = 40;
     uint16_t fill = canvas.color565(color.r, color.g, color.b);
 
-    if (tierIndex <= 0) {
+    if (isBoss) {
+        // Boss: biggest body plus a gold spike-crown across the top - visually distinct from all
+        // three regular tiers at a glance, reusing the same fillTriangle spike technique tier 1
+        // already uses below.
+        int bigRadius = radius + 14;
+        int cy = standY - bigRadius;
+        canvas.fillCircle(screenX, cy, bigRadius, fill);
+        constexpr int kCrownSpikes = 5;
+        int crownBaseY = cy - bigRadius + 4;
+        int crownSpan = bigRadius;
+        for (int s = 0; s < kCrownSpikes; ++s) {
+            int spikeX = screenX - crownSpan + (2 * crownSpan * s) / (kCrownSpikes - 1);
+            canvas.fillTriangle(spikeX - 4, crownBaseY, spikeX + 4, crownBaseY, spikeX, crownBaseY - 14, TFT_GOLD);
+        }
+        radius = bigRadius; // so the eyes/current-ring below sit correctly on the enlarged body
+    } else if (tierIndex <= 0) {
         // Tier 0: round "slime" body - today's original silhouette.
         canvas.fillCircle(screenX, standY - radius, radius, fill);
     } else if (tierIndex == 1) {
@@ -418,6 +451,44 @@ void drawBreakthroughFx(M5Canvas& canvas, int charX, int charY, uint32_t nowMs) 
         canvas.drawLine(charX, cy, ex, ey, TFT_YELLOW);
     }
 }
+
+// A brief red flash on the boss plus a bigger screen shake than a skill impact's - the mid-fight
+// enrage escalation is a bigger event than a regular hit, so it reads as one.
+void drawBossEnrageFx(M5Canvas& canvas, uint32_t nowMs, float& shakeX, float& shakeY) {
+    if (!gBossEnrageFxActive) return;
+    uint32_t elapsed = nowMs - gBossEnrageFxStartMs;
+    if (elapsed >= kBossEnrageFxDurationMs) { gBossEnrageFxActive = false; return; }
+    drawFlash(canvas, gLastEnemyScreenX, gLastEnemyScreenY, nowMs, gBossEnrageFxStartMs + kBossEnrageFxDurationMs,
+              14, 22, TFT_RED, TFT_MAROON);
+    float t = static_cast<float>(elapsed) / static_cast<float>(kBossEnrageFxDurationMs);
+    shakeX += shakeOffset(t, kBossEnrageShakeAmplitudePx, 0.0f);
+    shakeY += shakeOffset(t, kBossEnrageShakeAmplitudePx, kPi / 2.0f);
+}
+
+// An expanding red/gold ring plus radiating rays centered on the boss's last position - a bigger,
+// differently-colored cousin of drawBreakthroughFx above, for a boss kill.
+void drawBossDefeatFx(M5Canvas& canvas, uint32_t nowMs) {
+    if (!gBossDefeatFxActive) return;
+    uint32_t elapsed = nowMs - gBossDefeatFxStartMs;
+    if (elapsed >= kBossDefeatFxDurationMs) { gBossDefeatFxActive = false; return; }
+
+    float t = static_cast<float>(elapsed) / static_cast<float>(kBossDefeatFxDurationMs);
+    float envelope = pulseEnvelope(t);
+    int cx = gLastEnemyScreenX;
+    int cy = gLastEnemyScreenY - 20;
+    int ringRadius = static_cast<int>(kBossDefeatMaxRadiusPx * t);
+
+    canvas.drawCircle(cx, cy, ringRadius, TFT_RED);
+    if (ringRadius > 3) canvas.drawCircle(cx, cy, ringRadius - 3, TFT_GOLD);
+
+    int rayLen = ringRadius + static_cast<int>(kBossDefeatMaxRadiusPx * 0.4f * envelope);
+    for (int i = 0; i < kBossDefeatRays; ++i) {
+        float angle = (2.0f * kPi / static_cast<float>(kBossDefeatRays)) * static_cast<float>(i);
+        int ex = cx + static_cast<int>(std::cos(angle) * rayLen);
+        int ey = cy + static_cast<int>(std::sin(angle) * rayLen);
+        canvas.drawLine(cx, cy, ex, ey, TFT_ORANGE);
+    }
+}
 } // namespace
 
 void initZoneView(M5GFX& display) {
@@ -472,8 +543,8 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
         // index - with up to 5 elevated platforms and 2 monsters sharing one, keying off `i`
         // directly would clump every monster past the 3rd into the same "toughest" look.
         int visualTier = (spawn.platformIndex - 1) % 3;
-        RGB color = monsterColor(state.map.realmIndex, visualTier);
-        drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent, visualTier);
+        RGB color = spawn.isBoss ? bossColor(state.map.realmIndex) : monsterColor(state.map.realmIndex, visualTier);
+        drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent, visualTier, spawn.isBoss);
         if (isCurrent) {
             drawFlash(canvas, mx, my, nowMs, gAttackFlashUntilMs);
             gLastEnemyScreenX = mx;
@@ -487,10 +558,12 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
     if (state.phase == ZonePhase::Fighting) drawFlash(canvas, charX, charY, nowMs, gHitFlashUntilMs);
     drawLootPop(canvas, nowMs);
     drawBreakthroughFx(canvas, charX, charY, nowMs);
+    drawBossDefeatFx(canvas, nowMs);
 
     uint32_t skillElapsed = nowMs - gSkillFxStartMs;
     float shakeX = 0.0f;
     float shakeY = 0.0f;
+    drawBossEnrageFx(canvas, nowMs, shakeX, shakeY);
     if (gSkillFxIndex >= 0 && skillElapsed < kSkillFxTotalMs) {
         uint16_t fillColor, ringColor;
         skillColors(SKILLS[gSkillFxIndex].visual, fillColor, ringColor);
@@ -504,9 +577,12 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
                       gSkillFxStartMs + kSkillFxTotalMs, 10, 16, fillColor, ringColor);
         }
         if (skillElapsed < kShakeDurationMs) {
+            // += (not =): drawBossEnrageFx() above may have already accumulated its own shake
+            // into shakeX/shakeY this frame - overwriting instead of adding would silently drop
+            // the boss shake whenever a skill lands in the same frame an enrage flash is active.
             float shakeT = static_cast<float>(skillElapsed) / static_cast<float>(kShakeDurationMs);
-            shakeX = shakeOffset(shakeT, kShakeAmplitudePx, 0.0f);
-            shakeY = shakeOffset(shakeT, kShakeAmplitudePx, kPi / 2.0f);
+            shakeX += shakeOffset(shakeT, kShakeAmplitudePx, 0.0f);
+            shakeY += shakeOffset(shakeT, kShakeAmplitudePx, kPi / 2.0f);
         }
     }
 
@@ -609,5 +685,32 @@ void playBreakthroughSfx() {
     delay(100);
     M5.Speaker.tone(784.0f, 90);
     delay(100);
+    M5.Speaker.tone(1046.0f, 220);
+}
+
+void triggerBossEnrageFx() {
+    gBossEnrageFxActive = true;
+    gBossEnrageFxStartMs = millis();
+}
+
+void playBossEnrageSfx() {
+    // A harsh low-to-high snarl, distinct from the plain single-tone playHitSfx()/playAttackSfx().
+    M5.Speaker.tone(150.0f, 90);
+    delay(60);
+    M5.Speaker.tone(300.0f, 120);
+}
+
+void triggerBossDefeatFx() {
+    gBossDefeatFxActive = true;
+    gBossDefeatFxStartMs = millis();
+}
+
+void playBossDefeatSfx() {
+    // A short triumphant sting distinct from playVictorySfx()'s zone-clear jingle and
+    // playBreakthroughSfx()'s rising arpeggio.
+    M5.Speaker.tone(784.0f, 100);
+    delay(90);
+    M5.Speaker.tone(587.0f, 80);
+    delay(80);
     M5.Speaker.tone(1046.0f, 220);
 }

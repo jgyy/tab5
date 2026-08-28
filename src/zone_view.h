@@ -51,3 +51,12 @@ void playLootSfx();
 // canBreakthrough()/attemptBreakthrough()).
 void triggerRealmBreakthroughFx();
 void playBreakthroughSfx();
+
+// Boss-only events: a brief red flash + bigger shake for the mid-fight enrage threshold, and a
+// bigger red/gold ring-and-rays burst (distinct from triggerRealmBreakthroughFx()'s white/gold)
+// for a boss kill - main.cpp fires these alongside its existing monsterDefeated/skillFired
+// detection, gated on ZoneState::bossJustEnraged/bossJustDefeated.
+void triggerBossEnrageFx();
+void playBossEnrageSfx();
+void triggerBossDefeatFx();
+void playBossDefeatSfx();
