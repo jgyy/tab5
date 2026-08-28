@@ -26,8 +26,8 @@ tap-to-buy/tap-to-breakthrough anymore since there's no shop UI left to tap it o
 automation was already winning that race every time before the shop screen was removed,
 so nothing playable was lost by deleting the losing path. Automated actions don't force
 an immediate save (to spare NVS flash write endurance from very frequent writes) — the
-existing 15-second periodic autosave covers them; brightness/volume taps (the only touch
-controls left, see below) still save immediately.
+existing 15-second periodic autosave covers them; brightness/volume (no longer
+tap-adjustable, see below) still persist across reboots via the save file.
 
 The Secret Realm raycasting trial (below) is now the app's entire UI, autoplaying from
 first boot with no unlock gate — there's no other screen left to gate it behind. It's a
@@ -37,10 +37,10 @@ landscape, M5GFX reports the Tab5's display as 720x1280 (portrait logical coordi
 confirmed by reading the M5GFX source and a live serial print on real hardware — so the
 single screen is laid out as a vertical stack: a thin status header at top, the raycast
 viewport filling nearly all of the remaining screen, and a compact, fixed-height
-read-only stats/settings strip anchored to the bottom (breakthrough progress, player/enemy
-HP sharing one row, route progress, then brightness/volume sharing another — the only
-remaining touch controls), computed at runtime from `M5.Display.width()`/`.height()` rather
-than hardcoded. Held normally in landscape, this reads correctly on the physical device. The header bar shows battery percentage and
+read-only stats strip anchored to the bottom (breakthrough progress, player/enemy HP
+sharing one row, route progress), computed at runtime from `M5.Display.width()`/`.height()`
+rather than hardcoded. Held normally in landscape, this reads correctly on the physical
+device. The header bar shows battery percentage and
 charging state (a real reading from `M5.Power`) alongside the current realm name and
 Qi/sec rate; there's deliberately no clock, since without Wi-Fi/NTP there'd be nothing to
 keep it from silently drifting. Long realm names in the header and large Qi/sec and
@@ -102,6 +102,23 @@ follow-up revamp:
 Design spec: `docs/superpowers/specs/2026-08-27-raycasting-only-revamp-design.md`
 Implementation plan: `docs/superpowers/plans/2026-08-27-raycasting-only-revamp.md`
 
+**Known limitation — not yet validated on real hardware.** Unlike the old crystal's
+`kRenderSize = 240`, which was empirically tuned against measured on-device FPS (Task 8 of
+the original idle-game plan), no physical Tab5 was connected while this mode was built, so
+its render resolution (240×320 internally) is a conservative starting guess, not a
+benchmarked value — raycasting is much cheaper per pixel than the old crystal's triangle
+rasterizer, but the actual achievable FPS at this resolution is unconfirmed. Viewport *fit*
+is no longer part of this risk: the display scale used to be a fixed constant (`kTrialZoom`)
+tuned for the old, much taller "header to return-button strip" region, and it silently
+overflowed into the header and stats panel once the raycasting-only revamp halved the
+viewport height. That constant is gone — `renderTrialView()` in `src/trial_view.cpp` now
+computes the zoom live from the actual viewport (`raycastViewportBottom()`/`kHeaderHeight`),
+so it can never overflow regardless of display size or future layout changes. If it runs
+slower than expected on real hardware, `kTrialViewWidth`/`kTrialViewHeight` in
+`src/trial_view.cpp` are the knobs that affect actual compute cost. The full
+esp32p4_pioarduino build does compile and link successfully (verified in this environment),
+but flashing and visually/FPS-testing it on the device is the next step for whoever has it.
+
 ### Character skills & graphics pass
 
 The character has a growing, fully-automatic skill kit — 8 realm-gated skills
@@ -125,23 +142,6 @@ everything else in this project.
 
 Design spec: `docs/superpowers/specs/2026-08-28-maplestory-skills-and-graphics-design.md`
 Implementation plan: `docs/superpowers/plans/2026-08-28-maplestory-skills-and-graphics.md`
-
-**Known limitation — not yet validated on real hardware.** Unlike the old crystal's
-`kRenderSize = 240`, which was empirically tuned against measured on-device FPS (Task 8 of
-the original idle-game plan), no physical Tab5 was connected while this mode was built, so
-its render resolution (240×320 internally) is a conservative starting guess, not a
-benchmarked value — raycasting is much cheaper per pixel than the old crystal's triangle
-rasterizer, but the actual achievable FPS at this resolution is unconfirmed. Viewport *fit*
-is no longer part of this risk: the display scale used to be a fixed constant (`kTrialZoom`)
-tuned for the old, much taller "header to return-button strip" region, and it silently
-overflowed into the header and stats panel once the raycasting-only revamp halved the
-viewport height. That constant is gone — `renderTrialView()` in `src/trial_view.cpp` now
-computes the zoom live from the actual viewport (`raycastViewportBottom()`/`kHeaderHeight`),
-so it can never overflow regardless of display size or future layout changes. If it runs
-slower than expected on real hardware, `kTrialViewWidth`/`kTrialViewHeight` in
-`src/trial_view.cpp` are the knobs that affect actual compute cost. The full
-esp32p4_pioarduino build does compile and link successfully (verified in this environment),
-but flashing and visually/FPS-testing it on the device is the next step for whoever has it.
 
 ### Settings: brightness & volume
 
@@ -170,9 +170,10 @@ python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200
 ### Running Tests
 
 Game logic (3D vector/matrix math, the idle-game economy, save serialization and its
-v1->v2 migration, offline-earnings math, HUD hit-testing, DDA raycasting, the Secret
-Realm's fixed map/route/enemies, its combat resolution, its autoplay orchestration, its
-procedural wall textures, brightness/volume clamping, the character skill kit, and its FX curves) is hardware-agnostic C++ under
+v1->v2 migration, offline-earnings math, HUD hit-testing, the MapleStory-style zone's
+terrain generation, jump arc, patrol motion, combat resolution, procedural textures, and
+autoplay state machine, brightness/volume clamping, the character skill kit, and its FX
+curves) is hardware-agnostic C++ under
 `lib/core/`, unit-tested on the host machine — no device required. 131 test cases across 14
 suites, all passing:
 
@@ -190,15 +191,15 @@ flashes across this project with zero panic/crash/watchdog signatures.
   environment: `math3d` (vector/matrix math left over from the deleted crystal renderer;
   still unit-tested, no longer used by any production code), `economy`/`save`/
   `offline_earnings` (the idle-game loop and persistence, including the v1->v2 save
-  migration), `raycast` (DDA raycasting core), `trial_map`/`trial_combat`/`trial_state`/
-  `trial_textures` (the Secret Realm's fixed map, combat resolution, autoplay orchestration,
-  and procedural wall textures), `settings` (brightness/volume clamping), `skills` (realm-gated automatic combat skills), `fx` (pure shake/damage-number/parallax curves for zone_view).
+  migration), `zone_map`/`zone_combat`/`zone_state`/`zone_textures` (the MapleStory-style
+  zone's terrain generation, combat resolution, autoplay state machine, and procedural
+  colors), `settings` (brightness/volume clamping), `skills` (realm-gated automatic combat
+  skills), `fx` (pure shake/damage-number/parallax curves for zone_view).
 - `src/` — Arduino/M5Unified/M5GFX glue: `main.cpp` (setup/loop, the 50ms game tick,
-  automation, and driving the always-on Secret Realm trial — there's no `ViewMode` switch
-  anymore, just the one screen), `ui.h`/`ui.cpp` (header and stats/settings panel layout and
-  drawing; no tappable controls remain), `trial_view.h`/`trial_view.cpp`
-  (raycast rendering and SFX for the Secret Realm), `nvs_store`/`rtc_store` (persistence and
-  offline-earnings glue).
+  automation, and driving the always-on zone view — there's no `ViewMode` switch anymore,
+  just the one screen), `ui.h`/`ui.cpp` (header and stats panel layout and drawing; no
+  tappable controls remain), `zone_view.h`/`zone_view.cpp` (zone rendering, combat/skill FX,
+  and SFX), `nvs_store`/`rtc_store` (persistence and offline-earnings glue).
 - `test/` — one PlatformIO test suite per `lib/core/` module.
 - `docs/superpowers/specs/`, `docs/superpowers/plans/` — design specs and implementation
   plans for the xianxia idle game, the Secret Realm trial mode, and the raycasting-only
