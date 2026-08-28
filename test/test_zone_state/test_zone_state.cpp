@@ -386,21 +386,26 @@ void test_skill_and_defeat_on_same_tick_transitions_to_walking(void) {
         tickZone(s, 0.1, 10.0, 0);
     }
     TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
-    // 25 hp survives 2 basic attacks (20 dmg, realm 0's attackDamage=10) but not a 3rd (30 dmg) -
-    // and skill 0's 3.0s cooldown fires on that exact same tick (the 30th tick at dt=0.1), so
-    // this tick both defeats the enemy via the autoattack AND fires a skill simultaneously.
-    s.enemy.maxHp = 25;
-    s.enemy.hp = 25;
-    for (int i = 0; i < 35; ++i) {
-        tickZone(s, 0.1, 10.0, 0);
-        if (s.phase == ZonePhase::Walking) {
-            // Enemy defeated; check that a skill fired recently (within this battle)
-            TEST_ASSERT_TRUE(s.monstersDefeated[0]);
-            break;
+    s.enemy.maxHp = 1000000;
+    s.enemy.hp = 1000000; // stays alive until deliberately dropped right before a skill fires
+    int skillFiredOnLastTick = -1;
+    for (int i = 0; i < 100 && s.phase == ZonePhase::Fighting; ++i) {
+        // If this tick's dt will cross the currently-cycled skill's cooldown (the same formula
+        // tickSkill itself uses), force the enemy down to a sliver of HP first - so whichever
+        // damage source lands this tick (autoattack, skill, or both) also defeats it, exercising
+        // the same-tick ordering the spec calls out without depending on fragile
+        // float-accumulation timing landing on a pre-computed tick count (30 additions of 0.1f
+        // sum to just under 3.0f, not exactly 3.0f, so a fixed-tick-count approach mis-predicts
+        // which tick the skill actually fires on).
+        if (s.skill.timer + 0.1f >= SKILLS[s.skill.cycleIndex].cooldownSeconds) {
+            s.enemy.hp = 1;
         }
+        tickZone(s, 0.1, 10.0, 0);
+        skillFiredOnLastTick = s.skillFiredThisTick; // always the most recently executed tick's value
     }
     TEST_ASSERT_TRUE(s.phase == ZonePhase::Walking);
     TEST_ASSERT_TRUE(s.monstersDefeated[0]);
+    TEST_ASSERT_EQUAL_INT(0, skillFiredOnLastTick); // confirms a skill fired on the exact tick that ended the fight
 }
 
 void test_restart_zone_resets_skill_state(void) {
