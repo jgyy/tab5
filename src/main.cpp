@@ -118,7 +118,10 @@ void setup() {
     // The zone starts immediately and runs forever - there's no other screen to enter it
     // from anymore, and no unlock gate: even a fresh realm-0 character autoplays from boot,
     // consistent with "a weak cultivator can genuinely lose" already being the intended design.
-    gZoneState = startZone(makeZoneMap(gState.realmIndex), gState.realmIndex);
+    // isBossZoneForRunIndex(0) is always false (see zone_state.h) - spelled out explicitly
+    // rather than relied upon, so this boot call stays correct if kBossZoneInterval is ever
+    // retuned to 1.
+    gZoneState = startZone(makeZoneMap(gState.realmIndex, 0, isBossZoneForRunIndex(0)), gState.realmIndex);
 
     gLastTickMs = millis();
     gLastAutosaveMs = millis();
@@ -198,6 +201,8 @@ void loop() {
     bool zoneRestarted = wasFighting && gZoneState.player.hp > playerHpBefore;
     bool enemyHit = wasFighting && !zoneRestarted && gZoneState.enemy.hp < enemyHpBefore;
     bool skillFired = wasFighting && gZoneState.skillFiredThisTick >= 0;
+    bool bossEnrageTriggered = wasFighting && gZoneState.bossJustEnraged;
+    bool bossDefeated = wasFighting && !zoneRestarted && gZoneState.bossJustDefeated;
     // tickZone() only ever leaves Fighting for Walking via one of two paths: the enemy was just
     // defeated, or (zoneRestarted) the player was - excluding the latter leaves exactly "a kill
     // happened this tick", the same way the enemyHit/skillFired checks above already lean on
@@ -208,9 +213,17 @@ void loop() {
         triggerAttackFlash();
         spawnDamageNumber(false, enemyHpBefore - gZoneState.enemy.hp, skillFired ? gZoneState.skillFiredThisTick : -1);
     }
+    if (bossEnrageTriggered) {
+        triggerBossEnrageFx();
+        playBossEnrageSfx();
+    }
     if (monsterDefeated) {
         triggerLootPop();
         playLootSfx();
+        if (bossDefeated) {
+            triggerBossDefeatFx();
+            playBossDefeatSfx();
+        }
     }
     if (skillFired) {
         triggerSkillFx(gZoneState.skillFiredThisTick);
