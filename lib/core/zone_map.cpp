@@ -19,6 +19,16 @@ constexpr float kTierDamageStep = 6.0f;  // damage bonus per platform tier above
 // they fight the same as platform 3.
 constexpr int kMaxDifficultyTier = 2;
 
+// Boss stats: a single much-tougher monster in lieu of the platform-tiered roster (see
+// makeZoneMap's isBossZone branch) - deliberately not derived from the tier formula above,
+// since a boss isn't "one more tier," it's its own fight. First-pass numbers, to be tuned in
+// Task 2 against zone_state's boss-clear-rate simulation test.
+constexpr int kBossBaseHp = 300, kBossHpPerRealm = 120;
+constexpr int kBossBaseDamage = 18, kBossDamagePerRealm = 9;
+
+int bossMaxHp(int realmIndex) { return kBossBaseHp + kBossHpPerRealm * realmIndex; }
+int bossDamage(int realmIndex) { return kBossBaseDamage + kBossDamagePerRealm * realmIndex; }
+
 // A platform's spawnable interior keeps clear of its own edges by kSpawnEdgeMargin (declared in
 // zone_map.h so tests can check the invariant directly - zone_state.h's separate kPatrolMargin
 // matches its value so a patrolling monster's clamp lines up with where it could have spawned);
@@ -110,7 +120,7 @@ void placeMonstersOnPlatform(const Platform& platform, int genSeed, int platform
 }
 } // namespace
 
-ZoneMap makeZoneMap(int realmIndex, int seed) {
+ZoneMap makeZoneMap(int realmIndex, int seed, bool isBossZone) {
     ZoneMap m;
     m.realmIndex = realmIndex;
     int genSeed = combineSeed(realmIndex, seed);
@@ -129,6 +139,20 @@ ZoneMap makeZoneMap(int realmIndex, int seed) {
         prevY = y;
     }
     m.arenaWidth = m.platforms.back().x1;
+
+    if (isBossZone) {
+        int bossPlatformIndex = numElevated;
+        const Platform& p = m.platforms[static_cast<size_t>(bossPlatformIndex)];
+        MonsterSpawn boss;
+        boss.x = (p.x0 + p.x1) / 2.0f; // plain midpoint - a boss is one deliberate encounter,
+                                        // not part of the jittered multi-monster placement system
+        boss.platformIndex = bossPlatformIndex;
+        boss.maxHp = bossMaxHp(realmIndex);
+        boss.damage = bossDamage(realmIndex);
+        boss.isBoss = true;
+        m.monsters.push_back(boss);
+        return m;
+    }
 
     int baseHp = 30 + 20 * realmIndex;
     int baseDamage = 8 + 3 * realmIndex;

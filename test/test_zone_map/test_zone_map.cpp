@@ -289,6 +289,46 @@ void test_layouts_are_distinct_across_realms(void) {
     TEST_ASSERT_TRUE(anyDifference);
 }
 
+void test_boss_zone_has_exactly_one_boss_monster_on_last_platform(void) {
+    for (int realm = 0; realm < 16; realm += 3) {
+        for (int seed = 0; seed < 10; ++seed) {
+            ZoneMap m = makeZoneMap(realm, seed, /*isBossZone=*/true);
+            TEST_ASSERT_EQUAL(1, (int)m.monsters.size());
+            TEST_ASSERT_TRUE(m.monsters[0].isBoss);
+            int lastPlatformIndex = (int)m.platforms.size() - 1;
+            TEST_ASSERT_EQUAL(lastPlatformIndex, m.monsters[0].platformIndex);
+        }
+    }
+}
+
+void test_boss_monster_sits_at_its_platforms_midpoint(void) {
+    ZoneMap m = makeZoneMap(3, 7, true);
+    const Platform& p = m.platforms.back();
+    float mid = (p.x0 + p.x1) / 2.0f;
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, mid, m.monsters[0].x);
+}
+
+void test_boss_stats_match_the_boss_formula(void) {
+    ZoneMap low = makeZoneMap(0, 0, true);
+    ZoneMap high = makeZoneMap(10, 0, true);
+    TEST_ASSERT_EQUAL(300, low.monsters[0].maxHp);
+    TEST_ASSERT_EQUAL(18, low.monsters[0].damage);
+    TEST_ASSERT_EQUAL(300 + 120 * 10, high.monsters[0].maxHp);
+    TEST_ASSERT_EQUAL(18 + 9 * 10, high.monsters[0].damage);
+}
+
+// Regression: the isBossZone==false path (including its default) must be completely untouched.
+void test_non_boss_zone_is_unaffected_by_the_boss_parameter(void) {
+    ZoneMap withDefault = makeZoneMap(4, 2);
+    ZoneMap withExplicitFalse = makeZoneMap(4, 2, false);
+    TEST_ASSERT_EQUAL((int)withDefault.monsters.size(), (int)withExplicitFalse.monsters.size());
+    for (size_t i = 0; i < withDefault.monsters.size(); ++i) {
+        TEST_ASSERT_FALSE(withDefault.monsters[i].isBoss);
+        TEST_ASSERT_FALSE(withExplicitFalse.monsters[i].isBoss);
+        TEST_ASSERT_EQUAL(withDefault.monsters[i].maxHp, withExplicitFalse.monsters[i].maxHp);
+    }
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_realm_zero_first_monster_matches_original_secret_realm_numbers);
@@ -311,5 +351,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_every_realm_has_meaningful_verticality);
     RUN_TEST(test_monster_platform_index_is_non_decreasing);
     RUN_TEST(test_layouts_are_distinct_across_realms);
+    RUN_TEST(test_boss_zone_has_exactly_one_boss_monster_on_last_platform);
+    RUN_TEST(test_boss_monster_sits_at_its_platforms_midpoint);
+    RUN_TEST(test_boss_stats_match_the_boss_formula);
+    RUN_TEST(test_non_boss_zone_is_unaffected_by_the_boss_parameter);
     return UNITY_END();
 }

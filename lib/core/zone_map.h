@@ -11,6 +11,7 @@ struct MonsterSpawn {
     int platformIndex;   // which Platform (index into ZoneMap::platforms) this monster patrols on
     int maxHp;
     int damage;          // damage dealt to the player per attack landed
+    bool isBoss = false; // true for the single monster in a boss zone (see makeZoneMap)
 };
 
 constexpr float kMaxJumpGap = 2.5f;        // largest horizontal gap a single jump can cross
@@ -41,4 +42,9 @@ struct ZoneMap {
 // reshuffles the terrain/monsters without changing the realm's "look". Deterministic - identical
 // every call for the same (realmIndex, seed) pair; `seed` defaults to 0 so existing single-arg
 // call sites keep compiling unchanged.
-ZoneMap makeZoneMap(int realmIndex, int seed = 0);
+// `isBossZone`: when true, skips the normal per-platform monster loop entirely and places one
+// much-tougher MonsterSpawn (isBoss = true) on the last elevated platform instead — every other
+// platform in the zone has no monsters. Terrain generation (platform count/gaps/widths/heights)
+// is completely unaffected by this flag. Deciding *which* zoneRunIndex loops are boss zones is
+// the caller's job (see zone_state.h's isBossZoneForRunIndex()), not this function's.
+ZoneMap makeZoneMap(int realmIndex, int seed = 0, bool isBossZone = false);
