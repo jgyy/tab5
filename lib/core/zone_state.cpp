@@ -38,13 +38,15 @@ float patrolPositionX(float spawnX, float patrolRange, float t) {
     return spawnX + tri * patrolRange;
 }
 
-float patrolRangeForPlatform(const Platform& platform) {
-    float half = (platform.x1 - platform.x0) / 2.0f - kPatrolMargin;
+float patrolRangeForPlatform(const Platform& platform, float spawnX) {
+    float roomLeft = spawnX - (platform.x0 + kPatrolMargin);
+    float roomRight = (platform.x1 - kPatrolMargin) - spawnX;
+    float half = roomLeft < roomRight ? roomLeft : roomRight;
     if (half < 0.0f) half = 0.0f;
     return half < kMaxPatrolRange ? half : kMaxPatrolRange;
 }
 
-ZoneState startZone(const ZoneMap& map, int realmIndex) {
+ZoneState startZone(const ZoneMap& map, int realmIndex, int zoneRunIndex) {
     ZoneState s;
     s.map = map;
     s.posX = 0.0f;
@@ -57,11 +59,13 @@ ZoneState startZone(const ZoneMap& map, int realmIndex) {
     s.currentMonsterIndex = -1;
     s.monstersDefeated.assign(map.monsters.size(), false);
     s.qiRewardPending = 0.0;
+    s.zoneRunIndex = zoneRunIndex;
     return s;
 }
 
 void restartZone(ZoneState& state, int currentRealmIndex) {
-    state = startZone(makeZoneMap(currentRealmIndex), currentRealmIndex);
+    int nextRunIndex = state.zoneRunIndex + 1;
+    state = startZone(makeZoneMap(currentRealmIndex, nextRunIndex), currentRealmIndex, nextRunIndex);
 }
 
 namespace {
@@ -183,5 +187,9 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
         state.monstersDefeated[static_cast<size_t>(state.currentMonsterIndex)] = true;
         state.currentMonsterIndex = -1;
         state.phase = ZonePhase::Walking;
+        // A zone can roll several monsters per platform now, not always exactly 3 - full-healing
+        // on every kill keeps each fight its own "can I beat this one enemy" test (this module's
+        // original design intent) instead of chip damage accumulating across the whole run.
+        state.player.hp = state.player.maxHp;
     }
 }

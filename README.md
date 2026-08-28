@@ -171,6 +171,33 @@ hardware like everything else in this project.
 Design spec: `docs/superpowers/specs/2026-08-28-maplestory-skills-and-graphics-design.md`
 Implementation plan: `docs/superpowers/plans/2026-08-28-maplestory-skills-and-graphics.md`
 
+The zone's layout itself used to be completely fixed per realm: always exactly 4 platforms (1
+ground + 3 elevated) and always exactly 3 monsters, one per elevated platform, dead-center every
+time. Since the zone loops constantly within the same realm (realm only advances on a rare
+breakthrough), that meant grinding one realm for a while showed the literal same layout and same
+3 monsters in the same spots over and over. `makeZoneMap()` in `lib/core/zone_map.cpp` now takes
+a `seed` in addition to `realmIndex`, salting every hash-based structural roll (platform
+count/gaps/widths/heights, monster count/position) — elevated platforms now vary 3-5 per zone,
+and each spawns 1 or 2 monsters at a randomized interior position instead of always the exact
+midpoint, so a typical zone runs busier (roughly 4-7 monsters, occasionally more) than the old
+fixed 3. `ZoneState` tracks a `zoneRunIndex` that `restartZone()` bumps on every loop (both the
+clear-and-loop-again path and the death-restart path) and feeds back in as the next seed, so
+looping the same realm reshuffles the terrain and monsters each time instead of regenerating the
+identical layout. The realm's color palette deliberately stays keyed to `realmIndex` alone (not
+`seed`) — only structure/placement reshuffles, so a realm still reads as the same "place" even as
+its terrain and monster spread vary loop to loop. Difficulty still climbs by which platform a
+monster is on (two monsters sharing a platform share its difficulty), now via a smooth per-tier
+formula instead of the old fixed 3-entry table - but capped at the old design's highest tier
+(platform 3's), since platforms 4 and 5 are new and the difficulty curve was only ever tuned and
+validated up through 3. Without that cap a low-realm character could roll a 5-platform zone
+whose platform-4/5 monster is flatly unbeatable solo; extra platforms now only add more
+monsters, never tougher ones. More monsters per zone also meant more unhealed combat between an
+unchanged reward and an unchanged player HP pool, so `tickZone()` now fully heals the player on
+every monster kill, not just at zone start - each fight goes back to being its own "can I beat
+this one enemy" test instead of chip damage accumulating across a whole run. Together these
+restore roughly the original ~100% first-attempt clear rate at every realm from 1 to 15 (measured
+by simulation), instead of the 10-57% collapse an early version of this change had introduced.
+
 ### Settings: brightness & volume
 
 Two full specs' worth of investigation never found a confirmed root cause for the brightness/
@@ -202,7 +229,7 @@ v1->v2 migration, offline-earnings math, HUD hit-testing, the MapleStory-style z
 terrain generation, jump arc, patrol motion, combat resolution, procedural textures, and
 autoplay state machine, brightness/volume clamping, the character skill kit, and its FX
 curves) is hardware-agnostic C++ under
-`lib/core/`, unit-tested on the host machine — no device required. 131 test cases across 14
+`lib/core/`, unit-tested on the host machine — no device required. 153 test cases across 14
 suites, all passing:
 
 ```bash

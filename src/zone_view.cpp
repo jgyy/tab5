@@ -454,13 +454,26 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
                            state.currentMonsterIndex == static_cast<int>(i));
         const MonsterSpawn& spawn = state.map.monsters[i];
         const Platform& platform = state.map.platforms[static_cast<size_t>(spawn.platformIndex)];
+        float range = patrolRangeForPlatform(platform, spawn.x);
+        // Two monsters can now share a platform; without this they'd patrol in lockstep (same
+        // spawn-relative motion, same clock) and permanently overlap instead of just occasionally
+        // crossing paths. Nudging the second of a pair half a patrol period out of phase keeps
+        // them visually distinct as two monsters rather than one doubled-up blob.
+        bool isSecondOfPair =
+            i > 0 && state.map.monsters[i - 1].platformIndex == spawn.platformIndex;
+        float period = range > 0.0f ? 4.0f * range / kPatrolSpeed : 0.0f;
+        float phaseOffset = isSecondOfPair ? period / 2.0f : 0.0f;
         float liveX = isCurrent
             ? spawn.x
-            : patrolPositionX(spawn.x, patrolRangeForPlatform(platform), state.walkingElapsedSeconds);
+            : patrolPositionX(spawn.x, range, state.walkingElapsedSeconds + phaseOffset);
         int mx = screenXFor(liveX, state.map.arenaWidth);
         int my = screenYFor(platform.y, groundY);
-        RGB color = monsterColor(state.map.realmIndex, static_cast<int>(i));
-        drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent, static_cast<int>(i));
+        // Cycle silhouette/color through the 3 visual tiers by *platform*, not by flat vector
+        // index - with up to 5 elevated platforms and 2 monsters sharing one, keying off `i`
+        // directly would clump every monster past the 3rd into the same "toughest" look.
+        int visualTier = (spawn.platformIndex - 1) % 3;
+        RGB color = monsterColor(state.map.realmIndex, visualTier);
+        drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent, visualTier);
         if (isCurrent) {
             drawFlash(canvas, mx, my, nowMs, gAttackFlashUntilMs);
             gLastEnemyScreenX = mx;

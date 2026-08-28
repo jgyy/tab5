@@ -46,6 +46,26 @@ void test_defeating_monster_resumes_walking(void) {
     TEST_ASSERT_TRUE(s.monstersDefeated[0]);
 }
 
+// A zone can now roll several monsters per platform (up to ~10 total), so without a heal
+// between individual fights, chip damage would accumulate across the whole run instead of each
+// fight being its own "can I beat this one enemy" test - the design intent stated in this
+// module's header. Full-healing on every kill keeps that intent true regardless of monster count.
+void test_defeating_monster_heals_player_to_full(void) {
+    ZoneMap m = makeZoneMap(0);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 200 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    s.player.hp = 50;  // took damage earlier in the fight, comfortably survives a stray hit
+    s.enemy.hp = 1;     // dies on the very next landed autoattack
+    for (int i = 0; i < 50 && s.phase == ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Walking);
+    TEST_ASSERT_EQUAL_INT(s.player.maxHp, s.player.hp);
+}
+
 void test_player_defeat_resets_to_start(void) {
     ZoneMap m = makeZoneMap(0);
     ZoneState s = startZone(m, 0);
@@ -129,20 +149,53 @@ void test_restart_zone_rebuilds_map_for_current_realm(void) {
     ZoneState s = startZone(m, 0); // started weak, realm-0 zone
     restartZone(s, 4); // hidden economy has since advanced to realm 4
     TEST_ASSERT_EQUAL_INT(4, s.map.realmIndex);
-    ZoneMap expectedMap = makeZoneMap(4);
-    TEST_ASSERT_EQUAL_INT(expectedMap.monsters[0].maxHp, s.map.monsters[0].maxHp);
-    TEST_ASSERT_EQUAL_INT(expectedMap.monsters[2].damage, s.map.monsters[2].damage);
+    // First monster (always platform 1, zero tier bonus) reflects realm 4's base formula
+    // regardless of which seed restartZone() happened to roll.
+    TEST_ASSERT_EQUAL_INT(30 + 20 * 4, s.map.monsters[0].maxHp);
+    TEST_ASSERT_EQUAL_INT(8 + 3 * 4, s.map.monsters[0].damage);
 }
 
-// Regression guard for the balance retune: a matched-realm zone (the only pairing production
-// ever produces - map and player built from the same realmIndex) must actually be clearable,
-// even at the highest realm where monster stats are largest.
-void test_matched_realm_zone_is_clearable_at_high_realm(void) {
-    ZoneState s = startZone(makeZoneMap(15), 15);
-    for (int i = 0; i < 5000 && s.phase != ZonePhase::Cleared; ++i) {
-        tickZone(s, 0.1, 42.0, 15);
+// How many of `trials` freshly-seeded matched-realm zones (layout and player both built from
+// `realm`) clear on their first attempt, with no retries. Stops each trial as soon as its
+// attempt ends, one way or the other: Cleared, or restartZone() firing on defeat (detected via
+// zoneRunIndex changing from the seed that trial started at) - without this, tickZone's
+// built-in auto-restart would just keep rerolling fresh layouts forever and never distinguish
+// "this seed's layout cleared" from "some later reroll eventually cleared".
+int clearedOnFirstAttemptCount(int realm, int trials) {
+    int cleared = 0;
+    for (int seed = 0; seed < trials; ++seed) {
+        ZoneState s = startZone(makeZoneMap(realm, seed), realm, seed);
+        for (int i = 0; i < 5000 && s.phase != ZonePhase::Cleared && s.zoneRunIndex == seed; ++i) {
+            tickZone(s, 0.1, 42.0, realm);
+        }
+        if (s.phase == ZonePhase::Cleared && s.zoneRunIndex == seed) cleared++;
     }
-    TEST_ASSERT_TRUE(s.phase == ZonePhase::Cleared);
+    return cleared;
+}
+
+// Regression guard for the balance retune: a matched-realm zone must actually be clearable on
+// its first attempt, even at the highest realm where monster stats are largest, regardless of
+// which layout a given seed happens to roll (elevated platform count and monster count/spacing
+// per platform both vary now - see zone_map.h). Sweeps many seeds rather than pinning a single
+// one: a single fixed seed only proves that seed's particular layout is beatable, not the
+// underlying difficulty curve - exactly how the previous version of this test kept passing
+// while most other seeds' layouts had become unclearable (see the heal-on-kill fix in
+// tickZone() this test now exercises).
+void test_matched_realm_zone_is_clearable_at_high_realm(void) {
+    constexpr int kTrials = 30;
+    int cleared = clearedOnFirstAttemptCount(15, kTrials);
+    TEST_ASSERT_TRUE(cleared >= kTrials * 9 / 10); // >=90%, matching the original design's ~100% baseline
+}
+
+// Same guard at the *low* end of the realm range: a low-realm character has the weakest combat
+// stats, so it's the case most exposed by the difficulty-tier cap in zone_map.cpp (without that
+// cap, a 5-elevated-platform zone's platform-4 monster is flatly unbeatable solo at low realms,
+// no matter how much healing happens between fights - this isn't cumulative fatigue, it's a
+// single encounter stronger than the player can ever be at that realm).
+void test_matched_realm_zone_is_clearable_at_low_realm(void) {
+    constexpr int kTrials = 30;
+    int cleared = clearedOnFirstAttemptCount(1, kTrials);
+    TEST_ASSERT_TRUE(cleared >= kTrials * 9 / 10);
 }
 
 // Regression guard: a large dt (e.g. a frame hitch) must never let the Walking step carry
@@ -160,12 +213,15 @@ void test_large_dt_does_not_skip_monsters(void) {
         }
         // Must never be sitting at the end of the arena, on the last platform, while any
         // monster remains undefeated - that would mean a walk step skipped past one without
-        // triggering an encounter (the original bug this regression guards against).
+        // triggering an encounter (the original bug this regression guards against). Checked
+        // generically over however many monsters this layout rolled, since the count now varies.
         const Platform& lastPlatform = s.map.platforms.back();
         bool onLastPlatform =
             s.currentPlatformIndex == static_cast<int>(s.map.platforms.size()) - 1;
-        bool anyUndefeated =
-            !s.monstersDefeated[0] || !s.monstersDefeated[1] || !s.monstersDefeated[2];
+        bool anyUndefeated = false;
+        for (bool defeated : s.monstersDefeated) {
+            if (!defeated) { anyUndefeated = true; break; }
+        }
         bool softLocked = onLastPlatform && s.posX >= lastPlatform.x1 && anyUndefeated;
         TEST_ASSERT_FALSE(softLocked);
     }
@@ -223,15 +279,31 @@ void test_patrol_position_is_deterministic(void) {
 
 void test_patrol_range_for_platform_stays_within_platform(void) {
     Platform narrow{0.0f, 1.0f, 0.0f}; // width 1.0
-    float range = patrolRangeForPlatform(narrow);
+    float range = patrolRangeForPlatform(narrow, 0.5f); // spawn at the midpoint
     TEST_ASSERT_TRUE(range >= 0.0f);
     TEST_ASSERT_TRUE(range <= (narrow.x1 - narrow.x0) / 2.0f);
 }
 
 void test_patrol_range_for_platform_is_capped(void) {
     Platform wide{0.0f, 10.0f, 0.0f}; // wide enough that the cap, not the platform, binds
-    float range = patrolRangeForPlatform(wide);
+    float range = patrolRangeForPlatform(wide, 5.0f); // spawn at the midpoint
     TEST_ASSERT_FLOAT_WITHIN(0.001f, kMaxPatrolRange, range);
+}
+
+// Regression guard: a spawn is no longer always at its platform's exact midpoint (zone_map.cpp
+// now places monsters anywhere in a platform's interior), so the range must clamp off the
+// *nearer* edge to the actual spawn point, not off platform width alone - otherwise an
+// off-center spawn patrols straight past the near edge and reads as floating off the ledge.
+void test_patrol_range_for_platform_clamps_to_nearer_edge_of_off_center_spawn(void) {
+    Platform p{0.0f, 3.0f, 0.0f}; // width 3.0, well past 2*kMaxPatrolRange so the cap never binds
+    float spawnNearLeftEdge = 0.5f; // only 0.5 - kPatrolMargin of interior to its left
+    float range = patrolRangeForPlatform(p, spawnNearLeftEdge);
+    TEST_ASSERT_TRUE(spawnNearLeftEdge - range >= p.x0 + kPatrolMargin - 0.001f);
+    TEST_ASSERT_TRUE(spawnNearLeftEdge + range <= p.x1 - kPatrolMargin + 0.001f);
+    // The near (left) edge is what actually binds here, not the symmetric platform-width formula
+    // the old implementation used (which would have returned 3.0/2 - kPatrolMargin, clamped to
+    // kMaxPatrolRange - both larger than what's actually safe on the left).
+    TEST_ASSERT_TRUE(range < spawnNearLeftEdge - (p.x0 + kPatrolMargin) + 0.01f);
 }
 
 void test_reaching_non_final_platform_edge_triggers_jumping(void) {
@@ -284,9 +356,43 @@ void test_restart_zone_rebuilds_platform_and_position_state(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, s.posX);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, s.posY);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, s.walkingElapsedSeconds);
-    ZoneMap expectedMap = makeZoneMap(4);
-    TEST_ASSERT_EQUAL_INT((int)expectedMap.platforms.size(), (int)s.map.platforms.size());
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, expectedMap.platforms[1].y, s.map.platforms[1].y);
+    TEST_ASSERT_EQUAL_INT(4, s.map.realmIndex);
+    TEST_ASSERT_TRUE(s.map.platforms.size() >= 4);
+    TEST_ASSERT_TRUE(s.map.platforms.size() <= 6);
+}
+
+// The core fix this feature is for, exercised through the ZoneState API (not just raw
+// makeZoneMap): looping the same realm over and over must NOT keep handing back the exact same
+// platform/monster layout.
+void test_restart_zone_reshuffles_layout_across_successive_loops(void) {
+    ZoneState s = startZone(makeZoneMap(2), 2);
+    bool anyDifference = false;
+    float firstMonsterX = s.map.monsters[0].x;
+    size_t firstMonsterCount = s.map.monsters.size();
+    for (int i = 0; i < 30; ++i) {
+        restartZone(s, 2);
+        if (s.map.monsters.size() != firstMonsterCount) anyDifference = true;
+        if (std::fabs(s.map.monsters[0].x - firstMonsterX) > 0.001f) anyDifference = true;
+    }
+    TEST_ASSERT_TRUE(anyDifference);
+}
+
+void test_start_zone_defaults_zone_run_index_to_zero(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0);
+    TEST_ASSERT_EQUAL_INT(0, s.zoneRunIndex);
+}
+
+void test_start_zone_records_explicit_zone_run_index(void) {
+    ZoneState s = startZone(makeZoneMap(0, 5), 0, 5);
+    TEST_ASSERT_EQUAL_INT(5, s.zoneRunIndex);
+}
+
+void test_restart_zone_increments_zone_run_index(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0);
+    restartZone(s, 0);
+    TEST_ASSERT_EQUAL_INT(1, s.zoneRunIndex);
+    restartZone(s, 0);
+    TEST_ASSERT_EQUAL_INT(2, s.zoneRunIndex);
 }
 
 void test_start_zone_resets_skill_state(void) {
@@ -428,6 +534,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_tick_moves_toward_far_end);
     RUN_TEST(test_reaching_monster_enters_fighting);
     RUN_TEST(test_defeating_monster_resumes_walking);
+    RUN_TEST(test_defeating_monster_heals_player_to_full);
     RUN_TEST(test_player_defeat_resets_to_start);
     RUN_TEST(test_clearing_all_monsters_and_reaching_end_sets_reward);
     RUN_TEST(test_restart_zone_resets_state);
@@ -435,6 +542,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_tick_zone_restart_on_defeat_uses_passed_in_realm_index);
     RUN_TEST(test_restart_zone_rebuilds_map_for_current_realm);
     RUN_TEST(test_matched_realm_zone_is_clearable_at_high_realm);
+    RUN_TEST(test_matched_realm_zone_is_clearable_at_low_realm);
     RUN_TEST(test_large_dt_does_not_skip_monsters);
     RUN_TEST(test_jump_arc_starts_at_from_point);
     RUN_TEST(test_jump_arc_ends_at_to_point);
@@ -445,10 +553,15 @@ int main(int argc, char** argv) {
     RUN_TEST(test_patrol_position_is_deterministic);
     RUN_TEST(test_patrol_range_for_platform_stays_within_platform);
     RUN_TEST(test_patrol_range_for_platform_is_capped);
+    RUN_TEST(test_patrol_range_for_platform_clamps_to_nearer_edge_of_off_center_spawn);
     RUN_TEST(test_reaching_non_final_platform_edge_triggers_jumping);
     RUN_TEST(test_jumping_lands_on_destination_platform);
     RUN_TEST(test_walking_elapsed_seconds_freezes_while_fighting);
     RUN_TEST(test_restart_zone_rebuilds_platform_and_position_state);
+    RUN_TEST(test_restart_zone_reshuffles_layout_across_successive_loops);
+    RUN_TEST(test_start_zone_defaults_zone_run_index_to_zero);
+    RUN_TEST(test_start_zone_records_explicit_zone_run_index);
+    RUN_TEST(test_restart_zone_increments_zone_run_index);
     RUN_TEST(test_start_zone_resets_skill_state);
     RUN_TEST(test_skill_timer_frozen_while_walking);
     RUN_TEST(test_skill_fires_after_cooldown_while_fighting);

@@ -2,38 +2,79 @@
 #include "hash.h"
 
 namespace {
-constexpr int kNumElevatedPlatforms = 3;
+constexpr int kMinElevatedPlatforms = 3;
+constexpr int kMaxElevatedPlatforms = 5; // inclusive
 
-// Salts distinguish which quantity is drawn from the same (realmIndex, platformIndex) pair, so
-// a platform's gap/width/height-delta don't collide with each other.
+constexpr float kTierHpStep = 20.0f;     // hp bonus per platform tier above the first
+constexpr float kTierDamageStep = 6.0f;  // damage bonus per platform tier above the first
+
+// The original fixed-3-elevated-platform design only ever produced tiers 0/1/2 (platforms 1-3)
+// and every realm's difficulty curve was tuned and validated against that ceiling. Platforms 4
+// and 5 exist purely to add more monsters, not tougher ones: a monster's *difficulty* tier is
+// capped here at kMaxDifficultyTier even though its platformIndex can go higher, so a low-realm
+// character can never roll a solo monster stronger than the toughest one the original design
+// already proved beatable (a platform-4/5 monster ties platform 3's stats instead of exceeding
+// them). Visual variety is unaffected - zone_view.cpp's silhouette/color selection cycles by
+// platformIndex independently of this cap, so platforms 4/5 still look distinct even though
+// they fight the same as platform 3.
+constexpr int kMaxDifficultyTier = 2;
+
+// A platform's spawnable interior keeps clear of its own edges by kSpawnEdgeMargin (declared in
+// zone_map.h so tests can check the invariant directly - zone_state.h's separate kPatrolMargin
+// matches its value so a patrolling monster's clamp lines up with where it could have spawned);
+// when two monsters share a platform they're also kept at least kSpawnMinGap apart. Both are
+// well inside the smallest possible elevated-platform interior (min width 1.5 - 2*0.3 = 0.9), so
+// neither margin can ever invert the [lo, hi] range it's applied to.
+constexpr float kSpawnMinGap = 0.25f;
+
+// Salts distinguish which quantity is drawn from the same (genSeed, platformIndex) pair, so a
+// platform's gap/width/height-delta/monster-count/monster-position don't collide with each
+// other. Terrain salts stay small (<=17); monster-generation salts use a separate, much larger
+// range so the two families can never accidentally coincide.
 constexpr int kGapSalt = 0;
 constexpr int kWidthSalt = 1;
 constexpr int kHeightSalt = 2;
+constexpr int kGroundWidthSalt = -1;
+constexpr int kElevatedCountSalt = -2;
+constexpr int kMonsterCountSaltBase = 1000;
+constexpr int kMonsterPosSaltBase = 2000;
 
-float platformGap(int realmIndex, int platformIndex) {
-    return hashRange(realmIndex, platformIndex * 3 + kGapSalt, 0.5f, kMaxJumpGap);
+// Combines realmIndex and the caller's per-loop seed into one hash salt used for all
+// *structural* generation (platform/monster layout). The realm's color palette (zone_textures.h)
+// stays keyed to realmIndex alone, so re-rolling `seed` reshuffles the terrain/monsters every
+// zone loop without changing the realm's "look".
+int combineSeed(int realmIndex, int seed) {
+    return realmIndex * 1000003 + seed;
 }
 
-float platformWidth(int realmIndex, int platformIndex) {
-    return hashRange(realmIndex, platformIndex * 3 + kWidthSalt, 1.5f, 3.0f);
+int numElevatedPlatforms(int genSeed) {
+    constexpr float kSpan = static_cast<float>(kMaxElevatedPlatforms - kMinElevatedPlatforms + 1);
+    return kMinElevatedPlatforms + static_cast<int>(hashRange(genSeed, kElevatedCountSalt, 0.0f, kSpan));
 }
 
-float platformHeightDelta(int realmIndex, int platformIndex) {
+float platformGap(int genSeed, int platformIndex) {
+    return hashRange(genSeed, platformIndex * 3 + kGapSalt, 0.5f, kMaxJumpGap);
+}
+
+float platformWidth(int genSeed, int platformIndex) {
+    return hashRange(genSeed, platformIndex * 3 + kWidthSalt, 1.5f, 3.0f);
+}
+
+float platformHeightDelta(int genSeed, int platformIndex) {
     if (platformIndex == 1) {
         // The first elevated platform always starts from the ground (prevY == 0 exactly, since
         // platform 0 is always the ground baseline), so a symmetric delta here had ~50% odds of
-        // clamping straight back to 0 - and if platforms 2/3 also drew small/negative deltas,
-        // the whole realm ended up completely flat (observed for realmIndex 3, 6, 7). Forcing a
-        // strictly-positive delta for platform 1 guarantees every realm has at least one
-        // genuinely elevated platform, deterministically (not just empirically for the realms
-        // tested) - platforms 2 and 3 keep the full symmetric range for terrain variety.
-        return hashRange(realmIndex, platformIndex * 3 + kHeightSalt, 0.6f, kMaxJumpRise);
+        // clamping straight back to 0 - and if the rest also drew small/negative deltas, the
+        // whole realm ended up completely flat. Forcing a strictly-positive delta for platform 1
+        // guarantees every layout has at least one genuinely elevated platform, deterministically
+        // - later platforms keep the full symmetric range for terrain variety.
+        return hashRange(genSeed, platformIndex * 3 + kHeightSalt, 0.6f, kMaxJumpRise);
     }
-    return hashRange(realmIndex, platformIndex * 3 + kHeightSalt, -kMaxJumpRise, kMaxJumpRise);
+    return hashRange(genSeed, platformIndex * 3 + kHeightSalt, -kMaxJumpRise, kMaxJumpRise);
 }
 
-float groundWidth(int realmIndex) {
-    return hashRange(realmIndex, -1, 2.5f, 4.0f); // salt -1: distinct from any elevated index*3+salt
+float groundWidth(int genSeed) {
+    return hashRange(genSeed, kGroundWidthSalt, 2.5f, 4.0f);
 }
 
 float clampHeight(float y) {
@@ -41,39 +82,73 @@ float clampHeight(float y) {
     if (y > kMaxPlatformHeight) return kMaxPlatformHeight;
     return y;
 }
+
+// 1 or 2 monsters per elevated platform - roughly a third of platforms get a second spawn, so a
+// zone typically ends up busier than the old fixed "exactly one per platform" without every
+// platform doubling up.
+int monsterCountForPlatform(int genSeed, int platformIndex) {
+    float roll = hashUnitFloat(genSeed, kMonsterCountSaltBase + platformIndex * 10);
+    return roll < 0.35f ? 2 : 1;
+}
+
+// Deterministically places `count` (1 or 2) monsters along a platform's interior, clear of its
+// edges by kSpawnEdgeMargin and, when there are two, clear of each other by kSpawnMinGap - by
+// splitting the interior into `count` slots and hash-jittering within each, so a spawn is no
+// longer pinned to the exact platform midpoint.
+void placeMonstersOnPlatform(const Platform& platform, int genSeed, int platformIndex, int count,
+                              float outX[2]) {
+    float lo = platform.x0 + kSpawnEdgeMargin;
+    float hi = platform.x1 - kSpawnEdgeMargin;
+    if (count == 1) {
+        outX[0] = hashRange(genSeed, kMonsterPosSaltBase + platformIndex * 10, lo, hi);
+        return;
+    }
+    float mid = (lo + hi) / 2.0f;
+    float halfGap = kSpawnMinGap / 2.0f;
+    outX[0] = hashRange(genSeed, kMonsterPosSaltBase + platformIndex * 10 + 1, lo, mid - halfGap);
+    outX[1] = hashRange(genSeed, kMonsterPosSaltBase + platformIndex * 10 + 2, mid + halfGap, hi);
+}
 } // namespace
 
-ZoneMap makeZoneMap(int realmIndex) {
+ZoneMap makeZoneMap(int realmIndex, int seed) {
     ZoneMap m;
     m.realmIndex = realmIndex;
+    int genSeed = combineSeed(realmIndex, seed);
 
-    m.platforms.resize(1 + kNumElevatedPlatforms);
-    m.platforms[0] = Platform{0.0f, groundWidth(realmIndex), 0.0f};
+    int numElevated = numElevatedPlatforms(genSeed);
+    m.platforms.resize(1 + static_cast<size_t>(numElevated));
+    m.platforms[0] = Platform{0.0f, groundWidth(genSeed), 0.0f};
 
     float prevY = 0.0f;
-    for (int i = 1; i <= kNumElevatedPlatforms; ++i) {
-        float gap = platformGap(realmIndex, i);
-        float width = platformWidth(realmIndex, i);
-        float y = clampHeight(prevY + platformHeightDelta(realmIndex, i));
+    for (int i = 1; i <= numElevated; ++i) {
+        float gap = platformGap(genSeed, i);
+        float width = platformWidth(genSeed, i);
+        float y = clampHeight(prevY + platformHeightDelta(genSeed, i));
         float x0 = m.platforms[static_cast<size_t>(i - 1)].x1 + gap;
         m.platforms[static_cast<size_t>(i)] = Platform{x0, x0 + width, y};
         prevY = y;
     }
-
     m.arenaWidth = m.platforms.back().x1;
 
     int baseHp = 30 + 20 * realmIndex;
     int baseDamage = 8 + 3 * realmIndex;
-    constexpr int kTierHpBonus[3] = {0, 20, 50};
-    constexpr int kTierDamageBonus[3] = {0, 6, 14};
 
-    m.monsters.resize(kNumElevatedPlatforms);
-    for (int i = 0; i < kNumElevatedPlatforms; ++i) {
-        const Platform& p = m.platforms[static_cast<size_t>(i + 1)];
-        m.monsters[static_cast<size_t>(i)].x = (p.x0 + p.x1) / 2.0f;
-        m.monsters[static_cast<size_t>(i)].platformIndex = i + 1;
-        m.monsters[static_cast<size_t>(i)].maxHp = baseHp + kTierHpBonus[i];
-        m.monsters[static_cast<size_t>(i)].damage = baseDamage + kTierDamageBonus[i];
+    for (int i = 1; i <= numElevated; ++i) {
+        const Platform& p = m.platforms[static_cast<size_t>(i)];
+        int count = monsterCountForPlatform(genSeed, i);
+        float xs[2];
+        placeMonstersOnPlatform(p, genSeed, i, count, xs);
+        int tier = (i - 1) < kMaxDifficultyTier ? (i - 1) : kMaxDifficultyTier;
+        int tierHp = baseHp + static_cast<int>(kTierHpStep * static_cast<float>(tier));
+        int tierDamage = baseDamage + static_cast<int>(kTierDamageStep * static_cast<float>(tier));
+        for (int slot = 0; slot < count; ++slot) {
+            MonsterSpawn spawn;
+            spawn.x = xs[slot];
+            spawn.platformIndex = i;
+            spawn.maxHp = tierHp;
+            spawn.damage = tierDamage;
+            m.monsters.push_back(spawn);
+        }
     }
     return m;
 }

@@ -39,11 +39,13 @@ void jumpArcPosition(const JumpArc& arc, float elapsed, float& outX, float& outY
 // exactly spawnX at t=0. Pure function - patrol motion has no state beyond elapsed time.
 float patrolPositionX(float spawnX, float patrolRange, float t);
 
-// The patrol half-width for a monster on `platform`, clamped so it never reaches the
-// platform's edges: min(kMaxPatrolRange, platformWidth/2 - kPatrolMargin), floored at 0 (a
-// platform narrower than 2*kPatrolMargin degenerates to no patrol motion rather than a
-// negative range).
-float patrolRangeForPlatform(const Platform& platform);
+// The patrol half-width for a monster spawned at `spawnX` on `platform`, clamped so it never
+// reaches the platform's edges on either side: min(kMaxPatrolRange, distance from spawnX to the
+// nearer of platform.x0+kPatrolMargin / platform.x1-kPatrolMargin), floored at 0. Takes
+// `spawnX` (not just the platform) because a monster is no longer always spawned at its
+// platform's exact midpoint - clamping symmetrically off platform width alone would let an
+// off-center spawn patrol straight past the near edge.
+float patrolRangeForPlatform(const Platform& platform, float spawnX);
 
 struct ZoneState {
     ZoneMap map;
@@ -60,10 +62,14 @@ struct ZoneState {
     double qiRewardPending = 0.0;
     SkillState skill;             // fires only while Fighting; frozen otherwise, like walkingElapsedSeconds
     int skillFiredThisTick = -1;  // SKILLS[] index fired on the most recent tickZone() call, or -1
+    int zoneRunIndex = 0;         // seed `map` was built with; restartZone() bumps this so looping
+                                   // the same realm doesn't keep regenerating the same layout
 };
 
 // Fresh zone at the arena's start (posX = 0), Walking, player stats derived from realmIndex.
-ZoneState startZone(const ZoneMap& map, int realmIndex);
+// `zoneRunIndex` is the seed `map` was built with (defaults to 0 for the very first zone of a
+// session) - stored on the returned state so a later restartZone() knows what to bump next.
+ZoneState startZone(const ZoneMap& map, int realmIndex, int zoneRunIndex = 0);
 
 // Advances the zone by dtSeconds. While Walking: checks for a live, undefeated monster on the
 // current platform within kEncounterDistance of posX (entering Fighting if found), otherwise
@@ -80,5 +86,8 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
 
 // Resets to a fresh zone for currentRealmIndex - rebuilds the map (via makeZoneMap) too, not
 // just player stats, so a restart after a realm breakthrough actually shows the new realm's
-// zone (background palette + monster stats), not the zone it started in.
+// zone (background palette + monster stats), not the zone it started in. Also bumps
+// zoneRunIndex and feeds it to makeZoneMap as the new seed, so looping the same realm over and
+// over (the common case - realm only changes on a rare breakthrough) reshuffles the terrain and
+// monsters each time instead of regenerating the exact same layout.
 void restartZone(ZoneState& state, int currentRealmIndex);
