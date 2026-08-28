@@ -17,11 +17,6 @@ constexpr float kMaxJumpGap = 2.5f;        // largest horizontal gap a single ju
 constexpr float kMaxJumpRise = 1.8f;       // largest height change (up or down) a single jump can cross
 constexpr float kMaxPlatformHeight = 4.0f; // hard ceiling on any platform's height
 
-// Retained temporarily for src/zone_view.cpp's still-1D screen mapping, which isn't rewritten
-// until a later task - dead to zone_map.cpp/zone_state.cpp themselves as of this task. Deleted
-// once zone_view.cpp is rewritten to use ZoneMap::arenaWidth instead.
-constexpr float kArenaWidth = 10.0f;
-
 struct ZoneMap {
     int realmIndex = 0;                  // which realm's zone this is - drives background/ledge palette
     std::vector<Platform> platforms;     // always 4: [0]=ground, [1..3]=elevated

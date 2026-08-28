@@ -11,11 +11,25 @@ uint32_t gAttackFlashUntilMs = 0; // flash on the monster - player's attack land
 uint32_t gHitFlashUntilMs = 0;    // flash on the character - enemy's attack landed
 constexpr uint32_t kFlashDurationMs = 150;
 
-int screenXFor(float worldX) {
-    float frac = worldX / kArenaWidth;
+// Reserve headroom above the tallest possible platform (kMaxPlatformHeight) for its monster's
+// sprite (radius up to 40px below) plus margin, so nothing generated at the height ceiling
+// clips off the top of the viewport.
+constexpr int kTopMarginPx = 60;
+
+int screenXFor(float worldX, float arenaWidth) {
+    float frac = arenaWidth > 0.0f ? worldX / arenaWidth : 0.0f;
     if (frac < 0.0f) frac = 0.0f;
     if (frac > 1.0f) frac = 1.0f;
     return static_cast<int>(frac * gViewportW);
+}
+
+int screenYFor(float worldY, int groundY) {
+    float frac = worldY / kMaxPlatformHeight; // 0 (ground) .. 1 (tallest possible platform)
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+    int usableRise = groundY - kTopMarginPx;
+    if (usableRise < 0) usableRise = 0;
+    return groundY - static_cast<int>(frac * usableRise);
 }
 
 void drawBackground(M5Canvas& canvas, int realmIndex) {
@@ -27,34 +41,44 @@ void drawBackground(M5Canvas& canvas, int realmIndex) {
                      canvas.color565(ground.r, ground.g, ground.b));
 }
 
-void drawMonster(M5Canvas& canvas, int screenX, int groundY, int maxHp, RGB color, bool isCurrent) {
+void drawPlatform(M5Canvas& canvas, int screenX0, int screenX1, int screenY, RGB color) {
+    constexpr int kLedgeThickness = 10;
+    uint16_t fill = canvas.color565(color.r, color.g, color.b);
+    canvas.fillRect(screenX0, screenY, screenX1 - screenX0, kLedgeThickness, fill);
+}
+
+void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color, bool isCurrent) {
     int radius = 10 + maxHp / 15; // bigger monsters read as tougher
     if (radius > 40) radius = 40;
     uint16_t fill = canvas.color565(color.r, color.g, color.b);
-    canvas.fillCircle(screenX, groundY - radius, radius, fill);
-    canvas.fillCircle(screenX - radius / 3, groundY - radius, 2, TFT_BLACK); // eye
-    canvas.fillCircle(screenX + radius / 3, groundY - radius, 2, TFT_BLACK); // eye
+    canvas.fillCircle(screenX, standY - radius, radius, fill);
+    canvas.fillCircle(screenX - radius / 3, standY - radius, 2, TFT_BLACK); // eye
+    canvas.fillCircle(screenX + radius / 3, standY - radius, 2, TFT_BLACK); // eye
     if (isCurrent) {
-        canvas.drawCircle(screenX, groundY - radius, radius + 3, TFT_YELLOW);
+        canvas.drawCircle(screenX, standY - radius, radius + 3, TFT_YELLOW);
     }
 }
 
-void drawCharacter(M5Canvas& canvas, int screenX, int groundY, bool walking, uint32_t nowMs) {
+void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, uint32_t nowMs) {
     constexpr int kBodyHeight = 26;
     constexpr int kHeadRadius = 7;
+    constexpr int kAirborneLegTuck = 6; // airborne pose: legs tucked up higher than walk/idle
+    bool walking = (phase == ZonePhase::Walking);
+    bool jumping = (phase == ZonePhase::Jumping);
     int bob = (walking && ((nowMs / 150) % 2 == 0)) ? 0 : 2; // 2-frame walk cycle
-    int headY = groundY - kBodyHeight - kHeadRadius + bob;
-    int bodyTop = groundY - kBodyHeight + bob;
+    int legTuck = jumping ? kAirborneLegTuck : 0;
+    int headY = standY - kBodyHeight - kHeadRadius + bob;
+    int bodyTop = standY - kBodyHeight + bob;
     canvas.fillCircle(screenX, headY, kHeadRadius, TFT_WHITE);
     canvas.fillRect(screenX - 5, bodyTop, 10, kBodyHeight, TFT_BLUE);
-    canvas.fillRect(screenX - 5, groundY - 4 + bob, 4, 4, TFT_NAVY);          // left leg
-    canvas.fillRect(screenX + 1, groundY - (bob == 0 ? 4 : 8), 4, 4, TFT_NAVY); // right leg (alternates)
+    canvas.fillRect(screenX - 5, standY - 4 + bob - legTuck, 4, 4, TFT_NAVY);          // left leg
+    canvas.fillRect(screenX + 1, standY - (bob == 0 ? 4 : 8) - legTuck, 4, 4, TFT_NAVY); // right leg
 }
 
-void drawFlash(M5Canvas& canvas, int screenX, int groundY, uint32_t nowMs, uint32_t untilMs) {
+void drawFlash(M5Canvas& canvas, int screenX, int standY, uint32_t nowMs, uint32_t untilMs) {
     if (nowMs >= untilMs) return;
-    canvas.fillCircle(screenX, groundY - 20, 6, TFT_YELLOW);
-    canvas.drawCircle(screenX, groundY - 20, 10, TFT_ORANGE);
+    canvas.fillCircle(screenX, standY - 20, 6, TFT_YELLOW);
+    canvas.drawCircle(screenX, standY - 20, 10, TFT_ORANGE);
 }
 } // namespace
 
@@ -74,19 +98,35 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
     drawBackground(canvas, state.map.realmIndex);
     int groundY = static_cast<int>(gViewportH * 0.85f);
 
+    RGB ledgeColor = platformColor(state.map.realmIndex);
+    for (size_t i = 1; i < state.map.platforms.size(); ++i) { // [0] is the ground band above
+        const Platform& p = state.map.platforms[i];
+        int sx0 = screenXFor(p.x0, state.map.arenaWidth);
+        int sx1 = screenXFor(p.x1, state.map.arenaWidth);
+        int sy = screenYFor(p.y, groundY);
+        drawPlatform(canvas, sx0, sx1, sy, ledgeColor);
+    }
+
     for (size_t i = 0; i < state.map.monsters.size(); ++i) {
         if (state.monstersDefeated[i]) continue;
         bool isCurrent = (state.phase == ZonePhase::Fighting &&
                            state.currentMonsterIndex == static_cast<int>(i));
-        int mx = screenXFor(state.map.monsters[i].x);
+        const MonsterSpawn& spawn = state.map.monsters[i];
+        const Platform& platform = state.map.platforms[static_cast<size_t>(spawn.platformIndex)];
+        float liveX = isCurrent
+            ? spawn.x
+            : patrolPositionX(spawn.x, patrolRangeForPlatform(platform), state.walkingElapsedSeconds);
+        int mx = screenXFor(liveX, state.map.arenaWidth);
+        int my = screenYFor(platform.y, groundY);
         RGB color = monsterColor(state.map.realmIndex, static_cast<int>(i));
-        drawMonster(canvas, mx, groundY, state.map.monsters[i].maxHp, color, isCurrent);
-        if (isCurrent) drawFlash(canvas, mx, groundY, nowMs, gAttackFlashUntilMs);
+        drawMonster(canvas, mx, my, spawn.maxHp, color, isCurrent);
+        if (isCurrent) drawFlash(canvas, mx, my, nowMs, gAttackFlashUntilMs);
     }
 
-    int charX = screenXFor(state.posX);
-    drawCharacter(canvas, charX, groundY, state.phase == ZonePhase::Walking, nowMs);
-    if (state.phase == ZonePhase::Fighting) drawFlash(canvas, charX, groundY, nowMs, gHitFlashUntilMs);
+    int charX = screenXFor(state.posX, state.map.arenaWidth);
+    int charY = screenYFor(state.posY, groundY);
+    drawCharacter(canvas, charX, charY, state.phase, nowMs);
+    if (state.phase == ZonePhase::Fighting) drawFlash(canvas, charX, charY, nowMs, gHitFlashUntilMs);
 
     canvas.pushSprite(0, kHeaderHeight);
 }
