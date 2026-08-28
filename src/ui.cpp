@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "trial_state.h" // full CombatantState/TrialState definition - see the forward decl note in ui.h
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -21,7 +22,7 @@ void formatQi(double v, char* out, size_t outLen) {
     }
 }
 
-int raycastViewportBottom(int screenH) {
+int sceneViewportBottom(int screenH) {
     return kHeaderHeight + (screenH - kHeaderHeight) / 2;
 }
 
@@ -52,7 +53,7 @@ Layout gLayout;
 void computeLayout(int screenW, int screenH) {
     gLayout.screenW = screenW;
     gLayout.screenH = screenH;
-    gLayout.panelY0 = raycastViewportBottom(screenH);
+    gLayout.panelY0 = sceneViewportBottom(screenH);
     gLayout.panelH = screenH - gLayout.panelY0;
 
     int y = gLayout.panelY0 + kPanelTopPad;

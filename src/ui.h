@@ -2,8 +2,14 @@
 #include <cstddef>
 #include <M5Unified.h>
 #include "economy.h"
-#include "trial_state.h"
 #include "hittest.h"
+
+// Forward-declared rather than #include "trial_state.h": the only use below is a const
+// reference, and pulling in the full definition here (specifically trial_combat.h's
+// CombatantState) collides with zone_combat.h's CombatantState of the same name whenever a
+// single translation unit needs both this header and the new zone_* stack - as zone_view.cpp
+// does. ui.cpp includes trial_state.h directly for the full definition it actually needs.
+struct TrialState;
 
 // Button ids returned by hitTestHud(); -1 means "no button at that point." The brightness/
 // volume rows are the only tappable elements left anywhere on screen - every other stat is
@@ -27,7 +33,7 @@ constexpr int kHeaderHeight = 64;
 // A function (not a constant) because it depends on the live display height - shared between
 // trial_view.cpp (which centers the raycast view within this range) and ui.cpp (which draws
 // the panel starting here), so the two can never disagree about where the split sits.
-int raycastViewportBottom(int screenH);
+int sceneViewportBottom(int screenH);
 
 // Must be called once (e.g. from setup()) before the first drawHud() call — allocates the
 // offscreen header/panel sprites sized to `display`.

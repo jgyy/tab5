@@ -2,7 +2,7 @@
 #include "raycast.h"
 #include "trial_textures.h"
 #include "color.h"
-#include "ui.h" // kHeaderHeight, raycastViewportBottom() - shared viewport bounds
+#include "ui.h" // kHeaderHeight, sceneViewportBottom() - shared viewport bounds
 #include <cmath>
 #include <vector>
 
@@ -136,7 +136,7 @@ void renderTrialView(M5GFX& display, const TrialState& state) {
     // within the raycast viewport. Default sprite pivot is its own center, so (centerX,
     // centerY) here is where that center lands on the physical display.
     float availableTop = kHeaderHeight;
-    float availableBottom = raycastViewportBottom(display.height());
+    float availableBottom = sceneViewportBottom(display.height());
     float centerX = display.width() / 2.0f;
     float centerY = availableTop + (availableBottom - availableTop) / 2.0f;
     // Zoom the internal buffer up to fill the raycast viewport without overflowing it -
