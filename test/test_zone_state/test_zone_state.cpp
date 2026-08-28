@@ -146,8 +146,9 @@ void test_matched_realm_zone_is_clearable_at_high_realm(void) {
 }
 
 // Regression guard: a large dt (e.g. a frame hitch) must never let the Walking step carry
-// posX past an undefeated monster's encounter window. Without the clamp, this repeatedly
-// overshoots all 3 monsters and permanently soft-locks at posX == kArenaWidth in Walking.
+// posX past an undefeated monster's encounter window, or off a platform's edge without
+// triggering the jump/Cleared transition. Without the clamp, this repeatedly overshoots
+// all 3 monsters and permanently soft-locks at the last platform's edge in Walking.
 void test_large_dt_does_not_skip_monsters(void) {
     ZoneState s = startZone(makeZoneMap(0), 0);
     bool reachedFirstMonster = false;
