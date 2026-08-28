@@ -3,6 +3,7 @@
 #include "ui.h" // kHeaderHeight, sceneViewportBottom() - shared viewport bounds
 #include "skills.h"
 #include "fx.h"
+#include "hash.h"
 #include <cstdio>
 #include <cmath>
 
@@ -97,6 +98,55 @@ int screenYFor(float worldY, int groundY) {
 int gLastBackgroundRealm = -1;
 uint16_t gSkyColor565 = 0;
 uint16_t gGroundColor565 = 0;
+
+constexpr int kNumParallaxElements = 6;
+struct ParallaxElement { float seedX; float speedPxPerSec; };
+ParallaxElement gParallax[kNumParallaxElements];
+int gParallaxSeededForRealm = -1;
+
+// (Re)seeds gParallax only when realmIndex changes - mirrors the existing background-color
+// cache immediately above, so this isn't recomputed every frame.
+void seedParallaxIfNeeded(int realmIndex) {
+    if (realmIndex == gParallaxSeededForRealm) return;
+    for (int i = 0; i < kNumParallaxElements; ++i) {
+        gParallax[i].seedX = hashRange(realmIndex, 100 + i, 0.0f, static_cast<float>(gViewportW));
+        gParallax[i].speedPxPerSec = hashRange(realmIndex, 200 + i, 4.0f, 12.0f);
+    }
+    gParallaxSeededForRealm = realmIndex;
+}
+
+// Drifting background dressing behind the platforms: clouds for lower realms, embers for
+// mid realms, tiny stars for the highest realms - three visually distinct bands across the
+// 16 realms, all driven by the same hash-based determinism this project already uses for
+// terrain generation.
+void drawParallax(M5Canvas& canvas, int realmIndex, uint32_t nowMs) {
+    seedParallaxIfNeeded(realmIndex);
+    float elapsedSeconds = static_cast<float>(nowMs) / 1000.0f;
+    for (int i = 0; i < kNumParallaxElements; ++i) {
+        int x = static_cast<int>(parallaxWrapX(gParallax[i].seedX, gParallax[i].speedPxPerSec,
+                                                 elapsedSeconds, static_cast<float>(gViewportW)));
+        int y = 20 + (i % 3) * 14; // a few staggered heights near the top of the sky band
+        if (realmIndex < 6) {
+            canvas.fillEllipse(x, y, 14, 6, TFT_WHITE);
+        } else if (realmIndex < 12) {
+            canvas.fillCircle(x, y, 3, TFT_ORANGE);
+        } else {
+            canvas.drawLine(x - 4, y, x + 4, y, TFT_WHITE);
+            canvas.drawLine(x, y - 4, x, y + 4, TFT_WHITE);
+        }
+    }
+}
+
+// Deterministic ground tick-marks so the ground band isn't a flat color fill - reuses the
+// same 0.75f split drawBackground() uses for where the ground color starts.
+void drawGroundTexture(M5Canvas& canvas, int realmIndex) {
+    constexpr int kNumTufts = 8;
+    int groundTop = static_cast<int>(gViewportH * 0.75f);
+    for (int i = 0; i < kNumTufts; ++i) {
+        int x = static_cast<int>(hashRange(realmIndex, 300 + i, 0.0f, static_cast<float>(gViewportW)));
+        canvas.drawLine(x, groundTop + 2, x, groundTop + 6, TFT_BLACK);
+    }
+}
 
 void drawBackground(M5Canvas& canvas, int realmIndex) {
     if (realmIndex != gLastBackgroundRealm) {
@@ -219,6 +269,8 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
     uint32_t nowMs = millis();
 
     drawBackground(canvas, state.map.realmIndex);
+    drawParallax(canvas, state.map.realmIndex, nowMs);
+    drawGroundTexture(canvas, state.map.realmIndex);
     int groundY = static_cast<int>(gViewportH * 0.85f);
 
     RGB ledgeColor = platformColor(state.map.realmIndex);
