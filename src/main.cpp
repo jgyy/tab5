@@ -142,6 +142,14 @@ void loop() {
     auto touch = M5.Touch.getDetail();
     if (touch.wasClicked()) {
         int button = hitTestHud(touch.x, touch.y);
+        // Diagnostic for the brightness/volume unresponsiveness report: this project's own
+        // vendored M5Unified/M5GFX source was read to rule out a touch/display rotation
+        // mismatch (none found - both are configured identically for the Tab5, offset_rotation
+        // 0 on both) and to confirm main.cpp's M5.Touch usage matches the standard pattern.
+        // No confirmed root cause survived that reading, so this line exists to get real data
+        // on the next hardware flash: does a touch even register (this line printing at all),
+        // and if so, is touch.x/touch.y within the row it should have hit (button != -1)?
+        Serial.printf("[TOUCH] raw=(%d,%d) hitTestHud=%d\n", touch.x, touch.y, button);
         bool stateChanged = false;
         if (button == HUD_BUTTON_BRIGHTNESS_DOWN) {
             gBrightness = clampBrightness(static_cast<int>(gBrightness) - kSettingsStep);
