@@ -36,7 +36,12 @@ constexpr uint32_t kSkillTravelMs = 220;
 constexpr uint32_t kSkillImpactMs = 160;
 constexpr uint32_t kSkillFxTotalMs = kSkillTravelMs + kSkillImpactMs;
 constexpr uint32_t kShakeDurationMs = 140;
-constexpr float kShakeAmplitudePx = 5.0f;
+constexpr float kShakeAmplitudePx = 2.0f; // small on purpose: the canvas fills its screen band
+                                           // with zero slack, so ANY shake bleeds 1-2px into the
+                                           // header/panel for up to kShakeDurationMs - a proper
+                                           // fix needs an oversized offscreen canvas with margin,
+                                           // deferred as a larger follow-up; this keeps the shake
+                                           // present while minimizing the bleed
 constexpr float kPi = 3.14159265358979323846f;
 
 struct DamageNumber {
@@ -121,18 +126,26 @@ void seedParallaxIfNeeded(int realmIndex) {
 // terrain generation.
 void drawParallax(M5Canvas& canvas, int realmIndex, uint32_t nowMs) {
     seedParallaxIfNeeded(realmIndex);
+    // Light tint of this realm's own sky color (not an arbitrary fixed palette) - a flat +60
+    // per channel, clamped at 255, so parallax elements always read as "brighter version of the
+    // sky" rather than risking a fixed hue washing out against a similarly-hued sky.
+    RGB sky = zoneSkyColor(realmIndex);
+    uint8_t tintR = sky.r > 195 ? 255 : static_cast<uint8_t>(sky.r + 60);
+    uint8_t tintG = sky.g > 195 ? 255 : static_cast<uint8_t>(sky.g + 60);
+    uint8_t tintB = sky.b > 195 ? 255 : static_cast<uint8_t>(sky.b + 60);
+    uint16_t tint = canvas.color565(tintR, tintG, tintB);
     float elapsedSeconds = static_cast<float>(nowMs) / 1000.0f;
     for (int i = 0; i < kNumParallaxElements; ++i) {
         int x = static_cast<int>(parallaxWrapX(gParallax[i].seedX, gParallax[i].speedPxPerSec,
                                                  elapsedSeconds, static_cast<float>(gViewportW)));
         int y = 20 + (i % 3) * 14; // a few staggered heights near the top of the sky band
         if (realmIndex < 6) {
-            canvas.fillEllipse(x, y, 14, 6, TFT_WHITE);
+            canvas.fillEllipse(x, y, 14, 6, tint);
         } else if (realmIndex < 12) {
-            canvas.fillCircle(x, y, 3, TFT_ORANGE);
+            canvas.fillCircle(x, y, 3, tint);
         } else {
-            canvas.drawLine(x - 4, y, x + 4, y, TFT_WHITE);
-            canvas.drawLine(x, y - 4, x, y + 4, TFT_WHITE);
+            canvas.drawLine(x - 4, y, x + 4, y, tint);
+            canvas.drawLine(x, y - 4, x, y + 4, tint);
         }
     }
 }
@@ -182,7 +195,7 @@ void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color
         canvas.fillTriangle(screenX, cy - radius, screenX + radius, cy, screenX, cy + radius, fill);
         constexpr int kSpikes = 4;
         for (int s = 0; s < kSpikes; ++s) {
-            float angle = (6.2831853f / kSpikes) * static_cast<float>(s);
+            float angle = (2.0f * kPi / kSpikes) * static_cast<float>(s);
             int tipX = screenX + static_cast<int>((radius + 6) * std::cos(angle));
             int tipY = cy + static_cast<int>((radius + 6) * std::sin(angle));
             int baseX1 = screenX + static_cast<int>(radius * std::cos(angle - 0.2f));
@@ -217,7 +230,7 @@ void drawCharacter(M5Canvas& canvas, int screenX, int standY, ZonePhase phase, u
     constexpr uint32_t kCastingPoseMs = 200;
     bool walking = (phase == ZonePhase::Walking);
     bool jumping = (phase == ZonePhase::Jumping);
-    bool casting = gSkillFxIndex >= 0 && (nowMs - gSkillFxStartMs) < kCastingPoseMs;
+    bool casting = gSkillFxIndex >= 0 && (nowMs - gSkillFxStartMs) < kCastingPoseMs && phase == ZonePhase::Fighting;
 
     constexpr int kWalkBobFrames[4] = {0, 1, 2, 1}; // 4-frame walk cycle (was 2-frame)
     int bob = walking ? kWalkBobFrames[(nowMs / 100) % 4] : 0;

@@ -106,15 +106,6 @@ void drawRightAligned(M5Canvas& canvas, const char* text, int xRight, int yCente
     canvas.print(text);
 }
 
-void drawCentered(M5Canvas& canvas, const char* text, int xCenter, int yCenter, int maxWidth, int startSize,
-                   uint16_t fg, uint16_t bg) {
-    fitTextSize(canvas, text, maxWidth, startSize);
-    int w = canvas.textWidth(text);
-    canvas.setTextColor(fg, bg);
-    canvas.setCursor(xCenter - w / 2, yCenter - canvas.fontHeight() / 2);
-    canvas.print(text);
-}
-
 // Draws a two-tone progress bar (filled portion in `fillColor`, unfilled in dark grey) with a
 // left-aligned label overlaid in transparent white text - a solid fg/bg color pair would only
 // match one of the bar's two background colors, so this uses the single-argument

@@ -6,10 +6,11 @@ Full hardware datasheet: `docs/Tab5.pdf`.
 ## Xianxia Idle Game
 
 A cultivation-themed idle game running natively on the Tab5. Cultivate **Qi**, buy
-passive **Cultivation Methods** (generators), and advance through seven **Cultivation
+passive **Cultivation Methods** (generators), and advance through sixteen **Cultivation
 Realms** — Mortal Body, Qi Condensation, Foundation Establishment, Core Formation,
-Nascent Soul, Soul Transformation, Void Refinement — each breakthrough spending the
-next realm's Qi threshold.
+Nascent Soul, Soul Transformation, Void Refinement, Spirit Severing, Dao Seeking,
+Immortal Ascension, Earth Immortal, Heaven Immortal, Golden Immortal, Daluo Immortal,
+Saint Realm, Empyrean Realm — each breakthrough spending the next realm's Qi threshold.
 
 The economy no longer has a screen of its own. A later revamp deleted the rotating-crystal
 idle view and its touch-driven generator/breakthrough shop entirely — it was the buggiest,

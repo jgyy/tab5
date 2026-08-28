@@ -18,9 +18,9 @@ constexpr uint32_t kAutosaveIntervalMs = 15000;
 // setup() rotates it to landscape for the wide MapleStory-style zone view), which costs much
 // more per call than the raycast viewport's own blit used to. It's also just text/bars with no
 // motion of its own, so it doesn't need to redraw at full render-loop rate — throttling it
-// keeps the zone view's own redraw (every loop iteration, see below) unaffected, while still
-// forcing an immediate redraw right after any touch that actually changes state, so brightness/
-// volume taps still feel responsive.
+// keeps the zone view's own redraw (every loop iteration, see below) unaffected. There are no
+// touch controls left to force an immediate redraw for anymore (see ui.h) — every redraw here
+// just waits out the throttle.
 constexpr uint32_t kHudRedrawIntervalMs = 300; // ~3Hz when idle
 
 // The zone canvas now covers most of the screen (see sceneViewportBottom() in ui.cpp) rather
@@ -180,10 +180,15 @@ void loop() {
 
     tickZone(gZoneState, dt, reward, gState.realmIndex);
 
-    bool enemyHit = wasFighting && gZoneState.enemy.hp < enemyHpBefore;
+    // restartZone() (on player defeat) fully replaces the zone, so it also resets enemy.hp to 0
+    // - that alone would look like "the enemy took damage" to the enemyHit check below. Nothing
+    // else ever raises player.hp during ordinary combat (there's no healing), so player.hp going
+    // UP is an unambiguous "a restart just happened" signal.
+    bool zoneRestarted = wasFighting && gZoneState.player.hp > playerHpBefore;
+    bool enemyHit = wasFighting && !zoneRestarted && gZoneState.enemy.hp < enemyHpBefore;
     bool skillFired = wasFighting && gZoneState.skillFiredThisTick >= 0;
     if (enemyHit) {
-        playAttackSfx();
+        if (!skillFired) playAttackSfx(); // skip the plain-hit tone when the skill's own SFX will play this tick
         triggerAttackFlash();
         spawnDamageNumber(false, enemyHpBefore - gZoneState.enemy.hp, skillFired ? gZoneState.skillFiredThisTick : -1);
     }

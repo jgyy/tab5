@@ -47,8 +47,8 @@ float patrolRangeForPlatform(const Platform& platform);
 
 struct ZoneState {
     ZoneMap map;
-    float posX = 0.0f;                    // height above ground baseline, world units
-    float posY = 0.0f;
+    float posX = 0.0f;
+    float posY = 0.0f;                    // height above ground baseline, world units
     int currentPlatformIndex = 0;         // which platform posX/posY sit on while Walking
     ZonePhase phase = ZonePhase::Walking;
     JumpArc jump;                         // only meaningful while phase == Jumping

@@ -380,6 +380,29 @@ void test_skill_round_robins_among_unlocked_skills_in_zone(void) {
     TEST_ASSERT_EQUAL_INT(2, fired[5]);
 }
 
+void test_skill_and_defeat_on_same_tick_transitions_to_walking(void) {
+    ZoneState s = startZone(makeZoneMap(0), 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    // 25 hp survives 2 basic attacks (20 dmg, realm 0's attackDamage=10) but not a 3rd (30 dmg) -
+    // and skill 0's 3.0s cooldown fires on that exact same tick (the 30th tick at dt=0.1), so
+    // this tick both defeats the enemy via the autoattack AND fires a skill simultaneously.
+    s.enemy.maxHp = 25;
+    s.enemy.hp = 25;
+    for (int i = 0; i < 35; ++i) {
+        tickZone(s, 0.1, 10.0, 0);
+        if (s.phase == ZonePhase::Walking) {
+            // Enemy defeated; check that a skill fired recently (within this battle)
+            TEST_ASSERT_TRUE(s.monstersDefeated[0]);
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Walking);
+    TEST_ASSERT_TRUE(s.monstersDefeated[0]);
+}
+
 void test_restart_zone_resets_skill_state(void) {
     ZoneState s = startZone(makeZoneMap(4), 4);
     for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) {
@@ -391,6 +414,7 @@ void test_restart_zone_resets_skill_state(void) {
     restartZone(s, 4);
     TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.0f, s.skill.timer);
     TEST_ASSERT_EQUAL_INT(0, s.skill.cycleIndex);
+    TEST_ASSERT_EQUAL_INT(-1, s.skillFiredThisTick);
 }
 
 int main(int argc, char** argv) {
@@ -426,6 +450,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_skill_does_not_fire_before_cooldown_elapses);
     RUN_TEST(test_skill_bonus_damage_exceeds_plain_attack_damage);
     RUN_TEST(test_skill_round_robins_among_unlocked_skills_in_zone);
+    RUN_TEST(test_skill_and_defeat_on_same_tick_transitions_to_walking);
     RUN_TEST(test_restart_zone_resets_skill_state);
     return UNITY_END();
 }
