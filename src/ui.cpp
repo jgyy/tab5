@@ -32,14 +32,10 @@ constexpr int kSectionGap = 6;
 constexpr int kBreakthroughBarHeight = 26;
 constexpr int kHpBarHeight = 28;
 constexpr int kRouteBarHeight = 22;
-constexpr int kSettingsRowHeight = 48; // unchanged from the old standalone rows - these are the
-                                        // two controls under active hardware-response investigation,
-                                        // so their tap-target height is deliberately not shrunk.
 constexpr int kPanelHeight = kPanelTopPad
     + kBreakthroughBarHeight + kSectionGap
     + kHpBarHeight + kSectionGap
-    + kRouteBarHeight + kSectionGap
-    + kSettingsRowHeight + kPanelTopPad;
+    + kRouteBarHeight + kPanelTopPad;
 } // namespace
 
 int sceneViewportBottom(int screenH) {
@@ -56,7 +52,6 @@ struct Layout {
     int breakthroughY = 0;
     int hpY = 0;      // player HP (left half) and enemy HP (right half) share this row
     int routeY = 0;
-    int settingsY = 0; // brightness (left half) and volume (right half) share this row
 };
 Layout gLayout;
 
@@ -69,14 +64,12 @@ void computeLayout(int screenW, int screenH) {
     int y = gLayout.panelY0 + kPanelTopPad;
     gLayout.breakthroughY = y; y += kBreakthroughBarHeight + kSectionGap;
     gLayout.hpY = y; y += kHpBarHeight + kSectionGap;
-    gLayout.routeY = y; y += kRouteBarHeight + kSectionGap;
-    gLayout.settingsY = y;
+    gLayout.routeY = y;
 }
 
 Rect breakthroughRect() { return Rect{0, gLayout.breakthroughY, gLayout.screenW, kBreakthroughBarHeight}; }
 Rect hpRowRect() { return Rect{0, gLayout.hpY, gLayout.screenW, kHpBarHeight}; }
 Rect routeRect() { return Rect{0, gLayout.routeY, gLayout.screenW, kRouteBarHeight}; }
-Rect settingsRowRect() { return Rect{0, gLayout.settingsY, gLayout.screenW, kSettingsRowHeight}; }
 
 // Splits a row into two side-by-side halves (e.g. player/enemy HP, or brightness/volume),
 // and each settings half further into a left ("-") and right ("+") tappable quadrant.
@@ -85,17 +78,6 @@ Rect rightHalf(const Rect& r) { return Rect{r.x + r.w / 2, r.y, r.w - r.w / 2, r
 
 M5Canvas* gHeaderCanvas = nullptr;
 M5Canvas* gPanelCanvas = nullptr;
-
-// See flashSettingsButton()/drawSettingsHalf() - highlights whichever settings half (brightness
-// or volume) was just tapped, as a tap-was-received confirmation independent of the brightness/
-// volume value itself. kSettingsFlashDurationMs is a floor, not the actual on-screen duration:
-// drawHud() only runs on its own throttled cadence (immediately after the tap, then every
-// kHudRedrawIntervalMs while idle - see main.cpp), so the highlight stays visible through
-// whichever of those redraws lands before this expires, which can be up to one redraw interval
-// longer than kSettingsFlashDurationMs itself.
-int gSettingsFlashButton = HUD_BUTTON_NONE;
-uint32_t gSettingsFlashUntilMs = 0;
-constexpr uint32_t kSettingsFlashDurationMs = 400;
 
 // Picks the largest text size in [1, startSize] at which `text` fits within
 // maxWidth (measured with textWidth(), not assumed), sets it on `canvas`, and
@@ -156,24 +138,6 @@ void drawBar(M5Canvas& canvas, const Rect& r, float fraction, uint16_t fillColor
     canvas.print(label);
 }
 
-// Draws one settings control (brightness or volume) as "-" pinned to its left edge, "+" pinned
-// to its right edge, and the current value centered between them, so the two tappable halves
-// (see hitTestHud()) are visually obvious rather than baked into one run of left-aligned text.
-// Flashes yellow briefly after either half is tapped - see flashSettingsButton() and
-// kSettingsFlashDurationMs's comment for what "briefly" actually bounds.
-void drawSettingsHalf(M5Canvas& canvas, const Rect& r, const char* valueLabel,
-                       int downButton, int upButton, uint32_t nowMs) {
-    int ly = r.y - gLayout.panelY0;
-    bool flashing = nowMs < gSettingsFlashUntilMs
-        && (gSettingsFlashButton == downButton || gSettingsFlashButton == upButton);
-    uint16_t bg = flashing ? TFT_YELLOW : TFT_DARKGREY;
-    canvas.fillRect(r.x, ly, r.w, r.h, bg);
-    int yCenter = ly + r.h / 2;
-    drawLeftAligned(canvas, "-", r.x + 10, yCenter, 24, 2, TFT_WHITE, bg);
-    drawRightAligned(canvas, "+", r.x + r.w - 10, yCenter, 24, 2, TFT_WHITE, bg);
-    drawCentered(canvas, valueLabel, r.x + r.w / 2, yCenter, r.w - 80, 2, TFT_WHITE, bg);
-}
-
 void drawHeader(M5GFX& display, const GameState& state) {
     M5Canvas& hdr = *gHeaderCanvas;
     constexpr uint16_t kHeaderBg = 0x18E3; // dark navy-grey, distinct from the panel's black
@@ -222,8 +186,7 @@ void initHud(M5GFX& display) {
     gPanelCanvas->createSprite(gLayout.screenW, gLayout.panelH);
 }
 
-void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
-             uint8_t brightness, uint8_t volume) {
+void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
     if (!gPanelCanvas) initHud(display);
     drawHeader(display, state);
 
@@ -278,34 +241,6 @@ void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
     }
     drawBar(panel, routeRect(), monstersFraction, TFT_CYAN, monstersLabel);
 
-    uint32_t nowMs = millis();
-    Rect settingsRow = settingsRowRect();
-
-    char brLine[16];
-    snprintf(brLine, sizeof(brLine), "Bright %d%%", (brightness * 100) / 255);
-    drawSettingsHalf(panel, leftHalf(settingsRow), brLine,
-                      HUD_BUTTON_BRIGHTNESS_DOWN, HUD_BUTTON_BRIGHTNESS_UP, nowMs);
-
-    char volLine[16];
-    snprintf(volLine, sizeof(volLine), "Vol %d%%", (volume * 100) / 255);
-    drawSettingsHalf(panel, rightHalf(settingsRow), volLine,
-                      HUD_BUTTON_VOLUME_DOWN, HUD_BUTTON_VOLUME_UP, nowMs);
-
     panel.pushSprite(0, gLayout.panelY0);
 }
 
-int hitTestHud(int touchX, int touchY) {
-    Rect settingsRow = settingsRowRect();
-    Rect brightnessHalf = leftHalf(settingsRow);
-    Rect volumeHalf = rightHalf(settingsRow);
-    if (rectContains(leftHalf(brightnessHalf), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_DOWN;
-    if (rectContains(rightHalf(brightnessHalf), touchX, touchY)) return HUD_BUTTON_BRIGHTNESS_UP;
-    if (rectContains(leftHalf(volumeHalf), touchX, touchY)) return HUD_BUTTON_VOLUME_DOWN;
-    if (rectContains(rightHalf(volumeHalf), touchX, touchY)) return HUD_BUTTON_VOLUME_UP;
-    return HUD_BUTTON_NONE;
-}
-
-void flashSettingsButton(int button) {
-    gSettingsFlashButton = button;
-    gSettingsFlashUntilMs = millis() + kSettingsFlashDurationMs;
-}

@@ -158,45 +158,6 @@ void loop() {
         // is the only thing that persists automated progress.
     }
 
-    auto touch = M5.Touch.getDetail();
-    if (touch.wasClicked()) {
-        int button = hitTestHud(touch.x, touch.y);
-        // Diagnostic for the brightness/volume unresponsiveness report: this project's own
-        // vendored M5Unified/M5GFX source was read (twice now) to rule out a touch/display
-        // rotation mismatch, a missing Tab5 backlight-PWM/speaker-codec wiring, and a click-
-        // detection/flick-threshold bug - none found, both the app code and the library's Tab5
-        // bring-up look correct. No confirmed root cause survived either reading, so this line
-        // stays to get real data on the next hardware flash: does a touch even register (this
-        // line printing at all), and if so, is touch.x/touch.y within the row it should have
-        // hit (button != -1)? flashSettingsButton() below adds an on-screen counterpart: if the
-        // tapped quadrant visibly flashes yellow but the brightness/volume never actually
-        // changes, that narrows it from "touch not registering" to "the hardware effect isn't
-        // applying" - two very differently-fixed bugs that look identical from the outside.
-        Serial.printf("[TOUCH] raw=(%d,%d) hitTestHud=%d\n", touch.x, touch.y, button);
-        bool stateChanged = false;
-        if (button == HUD_BUTTON_BRIGHTNESS_DOWN) {
-            gBrightness = clampBrightness(static_cast<int>(gBrightness) - kSettingsStep);
-            M5.Display.setBrightness(gBrightness);
-            stateChanged = true;
-        } else if (button == HUD_BUTTON_BRIGHTNESS_UP) {
-            gBrightness = clampBrightness(static_cast<int>(gBrightness) + kSettingsStep);
-            M5.Display.setBrightness(gBrightness);
-            stateChanged = true;
-        } else if (button == HUD_BUTTON_VOLUME_DOWN) {
-            gVolume = clampVolume(static_cast<int>(gVolume) - kSettingsStep);
-            M5.Speaker.setVolume(gVolume);
-            stateChanged = true;
-        } else if (button == HUD_BUTTON_VOLUME_UP) {
-            gVolume = clampVolume(static_cast<int>(gVolume) + kSettingsStep);
-            M5.Speaker.setVolume(gVolume);
-            stateChanged = true;
-        }
-        if (stateChanged) {
-            flashSettingsButton(button);
-            saveNow();
-            gLastHudDrawMs = 0; // force an immediate (unthrottled) HUD redraw this frame
-        }
-    }
 
     if (now - gLastAutosaveMs >= kAutosaveIntervalMs) {
         saveNow();
@@ -230,7 +191,7 @@ void loop() {
         gState.qi += gZoneState.qiRewardPending;
         saveNow();
         renderZoneView(M5.Display, gZoneState); // show the cleared frame...
-        drawHud(M5.Display, gState, gZoneState, gBrightness, gVolume); // ...with "Cleared!" in the monsters bar, before pausing
+        drawHud(M5.Display, gState, gZoneState); // ...with "Cleared!" in the monsters bar, before pausing
         gLastHudDrawMs = now; // this was an explicit/forced draw; keep the throttle in sync
         gLastZoneRenderMs = now; // ditto for the zone-frame throttle below
         delay(1500);
@@ -244,7 +205,7 @@ void loop() {
     }
 
     if (now - gLastHudDrawMs >= kHudRedrawIntervalMs) {
-        drawHud(M5.Display, gState, gZoneState, gBrightness, gVolume);
+        drawHud(M5.Display, gState, gZoneState);
         gLastHudDrawMs = now;
     }
 }
