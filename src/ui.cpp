@@ -25,8 +25,7 @@ namespace {
 // ---- Layout tuning ----
 // The panel is a fixed-height strip anchored to the bottom of the screen (not a fraction of
 // it) so the zone view above it gets to be the screen, not half of it: player/enemy HP share
-// one row and brightness/volume share another (each still split into its own -/+ halves) to
-// keep every stat and both settings controls in a compact footprint.
+// one row, and all other stats fill the remaining space in a compact footprint.
 constexpr int kPanelTopPad = 8;
 constexpr int kSectionGap = 6;
 constexpr int kBreakthroughBarHeight = 26;
@@ -71,8 +70,7 @@ Rect breakthroughRect() { return Rect{0, gLayout.breakthroughY, gLayout.screenW,
 Rect hpRowRect() { return Rect{0, gLayout.hpY, gLayout.screenW, kHpBarHeight}; }
 Rect routeRect() { return Rect{0, gLayout.routeY, gLayout.screenW, kRouteBarHeight}; }
 
-// Splits a row into two side-by-side halves (e.g. player/enemy HP, or brightness/volume),
-// and each settings half further into a left ("-") and right ("+") tappable quadrant.
+// Splits a row into two side-by-side halves (e.g. player/enemy HP).
 Rect leftHalf(const Rect& r) { return Rect{r.x, r.y, r.w / 2, r.h}; }
 Rect rightHalf(const Rect& r) { return Rect{r.x + r.w / 2, r.y, r.w - r.w / 2, r.h}; }
 

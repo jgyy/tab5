@@ -15,13 +15,13 @@
 // actually active.
 constexpr int kHeaderHeight = 64;
 
-// The y-coordinate, in absolute screen space, where the zone viewport ends and the stats/
-// settings panel begins: screen height minus a fixed, compact panel height (see kPanelHeight
-// in ui.cpp), not a 50/50 split - the zone view is the game, so it gets the screen; the panel
-// is a thin strip of read-only stats plus the brightness/volume controls. A function (not a
-// constant) because it depends on the live display height - shared between zone_view.cpp
-// (which sizes its canvas to this range) and ui.cpp (which draws the panel starting here), so
-// the two can never disagree about where the split sits.
+// The y-coordinate, in absolute screen space, where the zone viewport ends and the stats
+// panel begins: screen height minus a fixed, compact panel height (see kPanelHeight in
+// ui.cpp), not a 50/50 split - the zone view is the game, so it gets the screen; the panel
+// is a thin strip of read-only stats. A function (not a constant) because it depends on the
+// live display height - shared between zone_view.cpp (which sizes its canvas to this range)
+// and ui.cpp (which draws the panel starting here), so the two can never disagree about
+// where the split sits.
 int sceneViewportBottom(int screenH);
 
 // Must be called once (e.g. from setup()) before the first drawHud() call — allocates the
