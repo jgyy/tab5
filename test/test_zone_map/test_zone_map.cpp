@@ -82,6 +82,17 @@ void test_platform_heights_within_bounds(void) {
     }
 }
 
+void test_every_realm_has_meaningful_verticality(void) {
+    for (int realm = 0; realm < 16; ++realm) {
+        ZoneMap m = makeZoneMap(realm);
+        float maxElevatedY = 0.0f;
+        for (size_t i = 1; i < m.platforms.size(); ++i) {
+            if (m.platforms[i].y > maxElevatedY) maxElevatedY = m.platforms[i].y;
+        }
+        TEST_ASSERT_TRUE(maxElevatedY > 0.5f);
+    }
+}
+
 void test_monster_platform_index_matches_encounter_order(void) {
     ZoneMap m = makeZoneMap(6);
     TEST_ASSERT_EQUAL(1, m.monsters[0].platformIndex);
@@ -112,6 +123,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_always_has_four_platforms_and_three_monsters);
     RUN_TEST(test_reachability_invariant_holds_across_realms);
     RUN_TEST(test_platform_heights_within_bounds);
+    RUN_TEST(test_every_realm_has_meaningful_verticality);
     RUN_TEST(test_monster_platform_index_matches_encounter_order);
     RUN_TEST(test_layouts_are_distinct_across_realms);
     return UNITY_END();

@@ -19,6 +19,16 @@ float platformWidth(int realmIndex, int platformIndex) {
 }
 
 float platformHeightDelta(int realmIndex, int platformIndex) {
+    if (platformIndex == 1) {
+        // The first elevated platform always starts from the ground (prevY == 0 exactly, since
+        // platform 0 is always the ground baseline), so a symmetric delta here had ~50% odds of
+        // clamping straight back to 0 - and if platforms 2/3 also drew small/negative deltas,
+        // the whole realm ended up completely flat (observed for realmIndex 3, 6, 7). Forcing a
+        // strictly-positive delta for platform 1 guarantees every realm has at least one
+        // genuinely elevated platform, deterministically (not just empirically for the realms
+        // tested) - platforms 2 and 3 keep the full symmetric range for terrain variety.
+        return hashRange(realmIndex, platformIndex * 3 + kHeightSalt, 0.6f, kMaxJumpRise);
+    }
     return hashRange(realmIndex, platformIndex * 3 + kHeightSalt, -kMaxJumpRise, kMaxJumpRise);
 }
 
