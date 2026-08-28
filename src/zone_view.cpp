@@ -125,10 +125,23 @@ CastPose castPoseFor(SkillVisual visual) {
     }
 }
 
-// Reserve headroom above the tallest possible platform (kMaxPlatformHeight) for its monster's
-// sprite (radius up to 40px below) plus margin, so nothing generated at the height ceiling
-// clips off the top of the viewport.
-constexpr int kTopMarginPx = 60;
+// Monster sprite dimensions, shared between drawMonster() below and the headroom screenYFor()
+// reserves. A boss is the tallest thing that can ever stand on a platform: a body at the capped
+// radius, enlarged by kBossBodyRadiusBonusPx and drawn as a full circle (so twice that tall
+// above its feet), topped by a kBossCrownHeightPx spike.
+constexpr int kMaxMonsterRadiusPx = 40;
+constexpr int kBossBodyRadiusBonusPx = 14;
+constexpr int kBossCrownHeightPx = 14;
+constexpr int kMaxBossSpriteHeightPx =
+    2 * (kMaxMonsterRadiusPx + kBossBodyRadiusBonusPx) + kBossCrownHeightPx; // 122px
+
+// Reserve headroom above the tallest possible platform (kMaxPlatformHeight) for the tallest
+// sprite that can stand on it, so nothing generated at the height ceiling clips off the top of
+// the viewport. Derived from the boss sprite's own dimensions above rather than independently
+// guessed, so the two can't drift apart: the previous hand-picked 60 was sized for a regular
+// monster's ~80px sprite and cut the crown off any boss standing on a tall platform - and a boss
+// always spawns on the zone's *last* elevated platform, which is often the tallest.
+constexpr int kTopMarginPx = kMaxBossSpriteHeightPx;
 
 int screenXFor(float worldX, float arenaWidth) {
     float frac = arenaWidth > 0.0f ? worldX / arenaWidth : 0.0f;
@@ -271,22 +284,31 @@ void drawPlatformDecoration(M5Canvas& canvas, int screenX0, int screenX1, int sc
 void drawMonster(M5Canvas& canvas, int screenX, int standY, int maxHp, RGB color, bool isCurrent, int tierIndex,
                   bool isBoss) {
     int radius = 10 + maxHp / 15; // bigger monsters read as tougher
-    if (radius > 40) radius = 40;
+    if (radius > kMaxMonsterRadiusPx) radius = kMaxMonsterRadiusPx;
     uint16_t fill = canvas.color565(color.r, color.g, color.b);
 
     if (isBoss) {
         // Boss: biggest body plus a gold spike-crown across the top - visually distinct from all
         // three regular tiers at a glance, reusing the same fillTriangle spike technique tier 1
         // already uses below.
-        int bigRadius = radius + 14;
+        int bigRadius = radius + kBossBodyRadiusBonusPx;
         int cy = standY - bigRadius;
         canvas.fillCircle(screenX, cy, bigRadius, fill);
+        // Each spike's base is placed on the circle itself (baseY = cy - sqrt(r^2 - dx^2)) rather
+        // than on one flat line: a few pixels below its apex the circle is far narrower than its
+        // full diameter (at bigRadius 54 the half-width 4px down is only ~20px), so a flat crown
+        // line spread across the body's width would leave every spike but the centre one floating
+        // in mid-air beside the body. crownSpan keeps the fan inside the upper dome, so the crown
+        // reads as a crown rather than as horns sprouting from the boss's widest point.
         constexpr int kCrownSpikes = 5;
-        int crownBaseY = cy - bigRadius + 4;
-        int crownSpan = bigRadius;
+        int crownSpan = bigRadius * 2 / 3;
         for (int s = 0; s < kCrownSpikes; ++s) {
-            int spikeX = screenX - crownSpan + (2 * crownSpan * s) / (kCrownSpikes - 1);
-            canvas.fillTriangle(spikeX - 4, crownBaseY, spikeX + 4, crownBaseY, spikeX, crownBaseY - 14, TFT_GOLD);
+            int dx = -crownSpan + (2 * crownSpan * s) / (kCrownSpikes - 1);
+            int spikeX = screenX + dx;
+            int baseY = cy - static_cast<int>(
+                std::sqrt(static_cast<float>(bigRadius * bigRadius - dx * dx)));
+            canvas.fillTriangle(spikeX - 4, baseY, spikeX + 4, baseY, spikeX,
+                                baseY - kBossCrownHeightPx, TFT_GOLD);
         }
         radius = bigRadius; // so the eyes/current-ring below sit correctly on the enlarged body
     } else if (tierIndex <= 0) {
