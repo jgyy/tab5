@@ -7,6 +7,7 @@
 #include "ui.h"
 #include "zone_map.h"
 #include "zone_state.h"
+#include "zone_events.h"
 #include "zone_view.h"
 #include "settings.h"
 
@@ -39,6 +40,11 @@ constexpr int64_t kRtcFallbackEpochSeconds = 1787844399;
 
 GameState gState;
 ZoneState gZoneState;
+// The pre-tick copy of gZoneState that deriveZoneTickEvents() compares against. Kept at file
+// scope and reassigned in place (rather than declared as a fresh local in loop()) because
+// ZoneState owns three small heap vectors: copy-assigning into an already-sized buffer reuses
+// their storage, so snapshotting costs no heap traffic once the loop is warm.
+ZoneState gZoneStateBefore;
 uint32_t gLastTickMs = 0;
 uint32_t gLastAutosaveMs = 0;
 uint32_t gLastHudDrawMs = 0;
@@ -187,55 +193,49 @@ void loop() {
     // zone is always worth a meaningful fraction of "how far you have left to go."
     int nextRealm = (gState.realmIndex < NUM_REALMS - 1) ? gState.realmIndex + 1 : gState.realmIndex;
     double reward = REALM_QI_THRESHOLD[nextRealm] * 0.05;
-    ZonePhase phaseBefore = gZoneState.phase;
-    bool wasFighting = (phaseBefore == ZonePhase::Fighting);
-    int enemyHpBefore = gZoneState.enemy.hp;
-    int playerHpBefore = gZoneState.player.hp;
+    // Snapshot the whole pre-tick state (plus the two HP values, which the FX below also need as
+    // plain ints for their damage-number amounts) so deriveZoneTickEvents() can diff it against
+    // the post-tick state. That derivation lives in lib/core/zone_events.cpp rather than here so
+    // it's reachable by `pio test -e native` - see zone_events.h.
+    gZoneStateBefore = gZoneState;
+    bool wasFighting = (gZoneStateBefore.phase == ZonePhase::Fighting);
+    int enemyHpBefore = gZoneStateBefore.enemy.hp;
+    int playerHpBefore = gZoneStateBefore.player.hp;
 
     tickZone(gZoneState, dt, reward, gState.realmIndex);
 
-    // restartZone() (on player defeat) fully replaces the zone, so it also resets enemy.hp to 0
-    // - that alone would look like "the enemy took damage" to the enemyHit check below. Nothing
-    // else ever raises player.hp during ordinary combat (there's no healing), so player.hp going
-    // UP is an unambiguous "a restart just happened" signal.
-    bool zoneRestarted = wasFighting && gZoneState.player.hp > playerHpBefore;
-    bool enemyHit = wasFighting && !zoneRestarted && gZoneState.enemy.hp < enemyHpBefore;
-    bool skillFired = wasFighting && gZoneState.skillFiredThisTick >= 0;
-    bool bossEnrageTriggered = wasFighting && gZoneState.bossJustEnraged;
-    bool bossDefeated = wasFighting && !zoneRestarted && gZoneState.bossJustDefeated;
-    // tickZone() only ever leaves Fighting for Walking via one of two paths: the enemy was just
-    // defeated, or (zoneRestarted) the player was - excluding the latter leaves exactly "a kill
-    // happened this tick", the same way the enemyHit/skillFired checks above already lean on
-    // exact before/after ZoneState comparisons instead of a dedicated event flag.
-    bool monsterDefeated = wasFighting && !zoneRestarted && gZoneState.phase == ZonePhase::Walking;
-    if (enemyHit) {
-        if (!skillFired) playAttackSfx(); // skip the plain-hit tone when the skill's own SFX will play this tick
+    ZoneTickEvents events = deriveZoneTickEvents(gZoneStateBefore, gZoneState, wasFighting,
+                                                  enemyHpBefore, playerHpBefore);
+    if (events.enemyHit) {
+        // skip the plain-hit tone when the skill's own SFX will play this tick
+        if (!events.skillFired) playAttackSfx();
         triggerAttackFlash();
-        spawnDamageNumber(false, enemyHpBefore - gZoneState.enemy.hp, skillFired ? gZoneState.skillFiredThisTick : -1);
+        spawnDamageNumber(false, enemyHpBefore - gZoneState.enemy.hp,
+                          events.skillFired ? gZoneState.skillFiredThisTick : -1);
     }
-    if (bossEnrageTriggered) {
+    if (events.bossEnrageTriggered) {
         triggerBossEnrageFx();
         playBossEnrageSfx();
     }
-    if (monsterDefeated) {
+    if (events.monsterDefeated) {
         triggerLootPop();
         playLootSfx();
-        if (bossDefeated) {
+        if (events.bossDefeated) {
             triggerBossDefeatFx();
             playBossDefeatSfx();
         }
     }
-    if (skillFired) {
+    if (events.skillFired) {
         triggerSkillFx(gZoneState.skillFiredThisTick);
         playSkillSfx(gZoneState.skillFiredThisTick);
     }
-    if (wasFighting && gZoneState.player.hp < playerHpBefore) {
+    if (events.playerHit) {
         playHitSfx();
         triggerHitFlash();
         spawnDamageNumber(true, playerHpBefore - gZoneState.player.hp, -1);
     }
 
-    if (phaseBefore != ZonePhase::Cleared && gZoneState.phase == ZonePhase::Cleared) {
+    if (gZoneStateBefore.phase != ZonePhase::Cleared && gZoneState.phase == ZonePhase::Cleared) {
         // Apply the reward exactly once, on the single tick this transition happens
         // (checking qiRewardPending > 0 every frame instead would re-apply it every
         // frame after, since tickZone() leaves it set while parked in Cleared).
