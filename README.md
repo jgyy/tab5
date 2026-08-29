@@ -260,6 +260,57 @@ DPS growth — which is a deliberate follow-up tuning pass, not a defect in the 
 Design spec: `docs/superpowers/specs/2026-08-28-boss-encounters-design.md`
 Implementation plan: `docs/superpowers/plans/2026-08-28-boss-encounters.md`
 
+### Ascension & Realm Identity
+
+Cultivation used to dead-end at realm 15 (Empyrean Realm): `canBreakthrough()` returns `false`
+forever once there, and Qi kept accumulating from the player's generators with nothing left to
+spend it on. A new automated **ascension** system (`lib/core/ascension.{h,cpp}`) fixes this: once
+the player reaches realm 15 and banks enough Qi past that point (a threshold that itself grows
+with each successive ascension, mirroring how `REALM_QI_THRESHOLD` grows realm to realm), the
+game automatically "ascends" - qi, generator counts, and realm index hard-reset to a fresh
+game's starting values, and the Qi spent converts (`sqrt`-scaled, so very large late-game Qi
+numbers yield sane, modest gains) into permanent **insight**, a prestige currency that never
+resets and compounds into an ever-growing Qi/sec multiplier for every future run. No manual
+trigger of any kind - it fires from the same automated tick loop that already drives
+breakthroughs and generator purchases, checked once per tick immediately after breakthroughs
+resolve. The header's stats readout gains an "Asc N (xM.MM)" suffix once the player has
+ascended at least once, and stays exactly as compact as before for a fresh game that hasn't.
+
+Separately, realm growth used to be lopsided: `SKILLS[]` only unlocks a new combat skill every
+*other* realm (0, 2, 4, ... 14), leaving odd realms granting nothing beyond the existing linear
+HP/damage scaling formula. A parallel **Realm Identity** trait table
+(`lib/core/traits.{h,cpp}`) fills exactly those odd realms (1, 3, 5, 7, 9, 11, 13, 15) with one
+new passive, always-on, fully automatic trait each - Iron Skin (damage reduction), Steady
+Breath (HP regen while fighting), Soul Echo (every 4th landed autoattack echoes for bonus
+damage), Execution (bonus damage finishing a weakened foe), Swift Feet (faster platform
+movement), Radiant Aura (a periodic damage tick independent of autoattack/skill cooldowns),
+Undying Will (survives one fatal hit per zone run), and the capstone Empyrean Radiance
+(amplifies all skill damage). Combined with the existing skill table, every single realm from 0
+to 15 now grants something new. All eight are deterministic (no RNG, matching this project's
+combat philosophy throughout) and implemented as small, targeted additions inside `tickZone()`'s
+existing Walking/Fighting branches - no new `ZonePhase`, and `tickCombat()`'s only change is one
+defaulted `incomingDamageMultiplier` parameter (Iron Skin), following the same
+backward-compatible-defaulted-parameter pattern `makeZoneMap`'s `seed`/`isBossZone` established.
+
+Since ascension resets `realmIndex` to 0, both systems compound together across repeat runs: a
+higher `insight` multiplier means a faster subsequent climb back through all 16 realms and all
+16 unlocks (8 skills, 8 traits) each time.
+
+Both are unit-tested end to end in `test/test_ascension/` and `test/test_traits/`, plus new
+integration cases in `test/test_zone_state/` and `test/test_zone_combat/` for how the traits
+hook into live combat/movement - no device required.
+
+**Known limitation — not yet validated on real hardware.** The ascension threshold-growth and
+insight-to-multiplier constants, and all eight trait magnitudes (damage reduction/regen
+rate/echo interval/execution threshold/movement speed/aura interval/skill multiplier), are
+first-pass numbers set by inspection here, not yet run through a simulation sweep the way boss
+stats were - a follow-up tuning pass, not a defect in the mechanics themselves. The ascension
+fanfare/FX and the HUD's new "Asc" readout are likewise unflashed, same caveat every prior
+spec in this project has carried.
+
+Design spec: `docs/superpowers/specs/2026-08-29-ascension-and-realm-identity-design.md`
+Implementation plan: `docs/superpowers/plans/2026-08-29-ascension-and-realm-identity.md`
+
 ### Settings: brightness & volume
 
 Two full specs' worth of investigation never found a confirmed root cause for the brightness/
@@ -287,12 +338,12 @@ python3 -m platformio device monitor --port /dev/ttyACM0 --baud 115200
 ### Running Tests
 
 Game logic (3D vector/matrix math, the idle-game economy, save serialization and its
-v1->v2 migration, offline-earnings math, HUD hit-testing, the MapleStory-style zone's
+v1->v2->v3 migrations, offline-earnings math, HUD hit-testing, the MapleStory-style zone's
 terrain generation, jump arc, patrol motion, combat resolution, procedural textures, and
 autoplay state machine, per-tick combat event derivation, brightness/volume clamping, the
-character skill kit, and its FX curves) is hardware-agnostic C++ under
-`lib/core/`, unit-tested on the host machine — no device required. 177 test cases across 15
-suites, all passing:
+character skill kit and realm identity traits, the ascension prestige loop, and FX curves) is
+hardware-agnostic C++ under `lib/core/`, unit-tested on the host machine — no device required.
+226 test cases across 17 suites, all passing:
 
 ```bash
 python3 -m platformio test -e native
@@ -308,12 +359,14 @@ flashes across this project with zero panic/crash/watchdog signatures.
   environment: `math3d` (vector/matrix math left over from the deleted crystal renderer;
   still unit-tested, no longer used by any production code), `economy`/`save`/
   `offline_earnings` (the idle-game loop and persistence, including the v1->v2 save
-  migration), `zone_map`/`zone_combat`/`zone_state`/`zone_textures` (the MapleStory-style
-  zone's terrain generation, combat resolution, autoplay state machine, and procedural
-  colors), `zone_events` (the pure before/after diff that turns one `tickZone()` call into the
-  discrete hit/kill/enrage/restart events `main.cpp` fires FX and SFX off), `settings`
-  (brightness/volume clamping), `skills` (realm-gated automatic combat skills), `fx` (pure
-  shake/damage-number/parallax curves for zone_view).
+  migration, plus the v2->v3 ascension migration), `ascension` (the prestige loop: insight
+  currency, Qi/sec multiplier, auto-trigger threshold), `zone_map`/`zone_combat`/`zone_state`/
+  `zone_textures` (the MapleStory-style zone's terrain generation, combat resolution, autoplay
+  state machine, and procedural colors), `zone_events` (the pure before/after diff that turns
+  one `tickZone()` call into the discrete hit/kill/enrage/restart events `main.cpp` fires FX and
+  SFX off), `settings` (brightness/volume clamping), `skills` (realm-gated automatic combat
+  skills, unlocking on even realms), `traits` (realm-gated passive Realm Identity traits,
+  unlocking on odd realms), `fx` (pure shake/damage-number/parallax curves for zone_view).
 - `src/` — Arduino/M5Unified/M5GFX glue: `main.cpp` (setup/loop, the 50ms game tick,
   automation, and driving the always-on zone view — there's no `ViewMode` switch anymore,
   just the one screen), `ui.h`/`ui.cpp` (header and stats panel layout and drawing; no
