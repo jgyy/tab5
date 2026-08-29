@@ -116,12 +116,38 @@ void test_realm_count_is_sixteen_with_expected_names(void) {
     TEST_ASSERT_EQUAL_DOUBLE(150000000000000000.0, REALM_QI_THRESHOLD[15]);
 }
 
+void test_qi_per_second_applies_ascension_multiplier(void) {
+    GameState state;
+    state.generatorCounts[0] = 1;
+    double expected = GENERATORS[0].baseQiPerSecond * realmMultiplier(0) * 1.5;
+    TEST_ASSERT_FLOAT_WITHIN(0.0001, expected, qiPerSecond(state, 1.5));
+}
+
+void test_qi_per_second_default_multiplier_is_one(void) {
+    GameState state;
+    state.generatorCounts[0] = 1;
+    double expected = GENERATORS[0].baseQiPerSecond * realmMultiplier(0);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001, expected, qiPerSecond(state));
+}
+
+void test_tick_applies_ascension_multiplier(void) {
+    GameState state;
+    state.generatorCounts[0] = 4;
+    double before = state.qi;
+    double rate = qiPerSecond(state, 2.0);
+    tick(state, 2.0, 2.0);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001, before + rate * 2.0, state.qi);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_realm_thresholds_increase_monotonically);
     RUN_TEST(test_cost_for_generator_grows_by_growth_rate);
     RUN_TEST(test_qi_per_second_ignores_locked_generators);
     RUN_TEST(test_qi_per_second_applies_realm_multiplier);
+    RUN_TEST(test_qi_per_second_applies_ascension_multiplier);
+    RUN_TEST(test_qi_per_second_default_multiplier_is_one);
+    RUN_TEST(test_tick_applies_ascension_multiplier);
     RUN_TEST(test_tick_adds_correct_amount);
     RUN_TEST(test_tick_ignores_non_positive_dt);
     RUN_TEST(test_cannot_breakthrough_below_threshold);

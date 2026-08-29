@@ -29,8 +29,8 @@ struct GameState {
 double costForGenerator(int genIndex, int ownedCount);
 double realmMultiplier(int realmIndex);
 bool isGeneratorUnlocked(const GameState& state, int genIndex);
-double qiPerSecond(const GameState& state);
-void tick(GameState& state, double dtSeconds);
+double qiPerSecond(const GameState& state, double ascensionMultiplier = 1.0);
+void tick(GameState& state, double dtSeconds, double ascensionMultiplier = 1.0);
 bool canBreakthrough(const GameState& state);
 
 // If canBreakthrough(state): spends REALM_QI_THRESHOLD[state.realmIndex + 1] from

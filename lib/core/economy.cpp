@@ -38,18 +38,18 @@ bool isGeneratorUnlocked(const GameState& state, int genIndex) {
     return state.realmIndex >= GENERATORS[genIndex].unlockRealmIndex;
 }
 
-double qiPerSecond(const GameState& state) {
+double qiPerSecond(const GameState& state, double ascensionMultiplier) {
     double total = 0.0;
     for (int i = 0; i < NUM_GENERATORS; ++i) {
         if (!isGeneratorUnlocked(state, i)) continue;
         total += state.generatorCounts[i] * GENERATORS[i].baseQiPerSecond;
     }
-    return total * realmMultiplier(state.realmIndex);
+    return total * realmMultiplier(state.realmIndex) * ascensionMultiplier;
 }
 
-void tick(GameState& state, double dtSeconds) {
+void tick(GameState& state, double dtSeconds, double ascensionMultiplier) {
     if (dtSeconds <= 0.0) return;
-    state.qi += qiPerSecond(state) * dtSeconds;
+    state.qi += qiPerSecond(state, ascensionMultiplier) * dtSeconds;
 }
 
 bool canBreakthrough(const GameState& state) {
