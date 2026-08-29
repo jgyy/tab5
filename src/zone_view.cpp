@@ -92,6 +92,17 @@ constexpr uint32_t kBossDefeatFxDurationMs = 900; // longer than kBreakthroughFx
 constexpr int kBossDefeatRays = 10;
 constexpr float kBossDefeatMaxRadiusPx = 80.0f;
 
+// Ascension celebration burst state - the biggest event in the game, fires each time the
+// player's entire cultivation life resets for a permanent Qi/sec bonus - a longer duration,
+// bigger radius, more rays, and a bigger shake than any other celebration here, so it visibly
+// reads as more significant than a regular realm breakthrough.
+bool gAscensionFxActive = false;
+uint32_t gAscensionFxStartMs = 0;
+constexpr uint32_t kAscensionFxDurationMs = 1200; // longer than kBossDefeatFxDurationMs's 900ms
+constexpr int kAscensionRays = 12;
+constexpr float kAscensionMaxRadiusPx = 95.0f;
+constexpr float kAscensionShakeAmplitudePx = 7.0f; // more than kBossEnrageShakeAmplitudePx's 5.0f
+
 // Fill/ring color pair for a skill's projectile and impact burst - color-only differentiation
 // (not per-skill unique geometry) keeps this tractable across 8 skill kinds while still
 // visually distinguishing which skill just fired.
@@ -511,6 +522,34 @@ void drawBossDefeatFx(M5Canvas& canvas, uint32_t nowMs) {
         canvas.drawLine(cx, cy, ex, ey, TFT_ORANGE);
     }
 }
+
+// An expanding violet/gold ring plus radiating rays centered on the character, bigger, longer-
+// lived, and with its own shake contribution, unlike drawBreakthroughFx's - ascension is a much
+// rarer, bigger milestone than a single realm breakthrough.
+void drawAscensionFx(M5Canvas& canvas, int charX, int charY, uint32_t nowMs, float& shakeX, float& shakeY) {
+    if (!gAscensionFxActive) return;
+    uint32_t elapsed = nowMs - gAscensionFxStartMs;
+    if (elapsed >= kAscensionFxDurationMs) { gAscensionFxActive = false; return; }
+
+    float t = static_cast<float>(elapsed) / static_cast<float>(kAscensionFxDurationMs);
+    float envelope = pulseEnvelope(t);
+    int cy = charY - 20;
+    int ringRadius = static_cast<int>(kAscensionMaxRadiusPx * t);
+
+    canvas.drawCircle(charX, cy, ringRadius, TFT_VIOLET);
+    if (ringRadius > 3) canvas.drawCircle(charX, cy, ringRadius - 3, TFT_GOLD);
+
+    int rayLen = ringRadius + static_cast<int>(kAscensionMaxRadiusPx * 0.4f * envelope);
+    for (int i = 0; i < kAscensionRays; ++i) {
+        float angle = (2.0f * kPi / static_cast<float>(kAscensionRays)) * static_cast<float>(i);
+        int ex = charX + static_cast<int>(std::cos(angle) * rayLen);
+        int ey = cy + static_cast<int>(std::sin(angle) * rayLen);
+        canvas.drawLine(charX, cy, ex, ey, TFT_GOLD);
+    }
+
+    shakeX += shakeOffset(t, kAscensionShakeAmplitudePx, 0.0f);
+    shakeY += shakeOffset(t, kAscensionShakeAmplitudePx, kPi / 2.0f);
+}
 } // namespace
 
 void initZoneView(M5GFX& display) {
@@ -586,6 +625,7 @@ void renderZoneView(M5GFX& display, const ZoneState& state) {
     float shakeX = 0.0f;
     float shakeY = 0.0f;
     drawBossEnrageFx(canvas, nowMs, shakeX, shakeY);
+    drawAscensionFx(canvas, charX, charY, nowMs, shakeX, shakeY);
     if (gSkillFxIndex >= 0 && skillElapsed < kSkillFxTotalMs) {
         uint16_t fillColor, ringColor;
         skillColors(SKILLS[gSkillFxIndex].visual, fillColor, ringColor);
@@ -735,4 +775,24 @@ void playBossDefeatSfx() {
     M5.Speaker.tone(587.0f, 80);
     delay(80);
     M5.Speaker.tone(1046.0f, 220);
+}
+
+void triggerAscensionFx() {
+    gAscensionFxActive = true;
+    gAscensionFxStartMs = millis();
+}
+
+void playAscensionSfx() {
+    // The grandest fanfare in the game - a full ascending run ending on a sustained high note,
+    // distinct from playBreakthroughSfx()'s shorter triad arpeggio, since ascension is a much
+    // bigger, rarer milestone than a single realm breakthrough.
+    M5.Speaker.tone(392.0f, 90);
+    delay(90);
+    M5.Speaker.tone(523.0f, 90);
+    delay(90);
+    M5.Speaker.tone(659.0f, 90);
+    delay(90);
+    M5.Speaker.tone(784.0f, 90);
+    delay(90);
+    M5.Speaker.tone(1568.0f, 320);
 }

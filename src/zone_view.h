@@ -60,3 +60,9 @@ void triggerBossEnrageFx();
 void playBossEnrageSfx();
 void triggerBossDefeatFx();
 void playBossDefeatSfx();
+
+// Ascension events: main.cpp fires these once per automatic ascension (gated on
+// canAscend()/attemptAscend() in the main tick loop) - the biggest celebration in the game,
+// distinct from a regular realm breakthrough.
+void triggerAscensionFx();
+void playAscensionSfx();
