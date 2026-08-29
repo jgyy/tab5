@@ -60,6 +60,27 @@ void test_tick_combat_is_deterministic(void) {
     TEST_ASSERT_EQUAL_INT(e1.hp, e2.hp);
 }
 
+void test_tick_combat_incoming_damage_multiplier_reduces_damage_to_player(void) {
+    CombatantState player = makePlayerCombatant(0);
+    CombatantState enemy = makeEnemyCombatant(30, 20);
+    tickCombat(player, enemy, 1.2, 0.5f); // enemy's 1.2s cooldown elapses; 20 * 0.5 = 10 damage
+    TEST_ASSERT_EQUAL_INT(90, player.hp);
+}
+
+void test_tick_combat_default_multiplier_matches_full_damage(void) {
+    CombatantState player = makePlayerCombatant(0);
+    CombatantState enemy = makeEnemyCombatant(30, 20);
+    tickCombat(player, enemy, 1.2); // no multiplier argument -> defaults to 1.0, unchanged behavior
+    TEST_ASSERT_EQUAL_INT(80, player.hp);
+}
+
+void test_tick_combat_incoming_damage_multiplier_does_not_affect_players_own_damage(void) {
+    CombatantState player = makePlayerCombatant(0); // damage 10
+    CombatantState enemy = makeEnemyCombatant(30, 20);
+    tickCombat(player, enemy, 1.0, 0.5f); // player's 1.0s cooldown elapses; enemy's 1.2s doesn't
+    TEST_ASSERT_EQUAL_INT(20, enemy.hp); // full 10 damage, unaffected by incomingDamageMultiplier
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_player_combatant_scales_with_realm);
@@ -68,5 +89,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_tick_combat_player_attack_lands_at_cooldown);
     RUN_TEST(test_tick_combat_enemy_damage_clamps_player_hp_at_zero);
     RUN_TEST(test_tick_combat_is_deterministic);
+    RUN_TEST(test_tick_combat_incoming_damage_multiplier_reduces_damage_to_player);
+    RUN_TEST(test_tick_combat_default_multiplier_matches_full_damage);
+    RUN_TEST(test_tick_combat_incoming_damage_multiplier_does_not_affect_players_own_damage);
     return UNITY_END();
 }

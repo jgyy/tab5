@@ -21,19 +21,22 @@ CombatantState makeEnemyCombatant(int maxHp, int damage) {
 }
 
 namespace {
-bool tickOne(CombatantState& attacker, CombatantState& defender, double dtSeconds) {
+bool tickOne(CombatantState& attacker, CombatantState& defender, double dtSeconds,
+             float damageMultiplier) {
     attacker.attackTimer += static_cast<float>(dtSeconds);
     if (attacker.attackTimer < attacker.attackCooldownSeconds) return false;
     attacker.attackTimer = 0.0f;
-    defender.hp -= attacker.attackDamage;
+    int damage = static_cast<int>(static_cast<float>(attacker.attackDamage) * damageMultiplier);
+    defender.hp -= damage;
     if (defender.hp < 0) defender.hp = 0;
     return true;
 }
 } // namespace
 
-bool tickCombat(CombatantState& player, CombatantState& enemy, double dtSeconds) {
-    bool playerLanded = tickOne(player, enemy, dtSeconds);
-    bool enemyLanded = tickOne(enemy, player, dtSeconds);
+bool tickCombat(CombatantState& player, CombatantState& enemy, double dtSeconds,
+                 float incomingDamageMultiplier) {
+    bool playerLanded = tickOne(player, enemy, dtSeconds, 1.0f);
+    bool enemyLanded = tickOne(enemy, player, dtSeconds, incomingDamageMultiplier);
     return playerLanded || enemyLanded;
 }
 

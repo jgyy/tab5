@@ -22,6 +22,10 @@ CombatantState makeEnemyCombatant(int maxHp, int damage);
 // cooldown deal their attackDamage to the other (hp clamped at 0) and reset to 0. Both can
 // land in the same call if both cooldowns elapse within dtSeconds. Returns true if at least
 // one attack landed this call.
-bool tickCombat(CombatantState& player, CombatantState& enemy, double dtSeconds);
+// incomingDamageMultiplier scales only the damage `enemy` deals to `player` (never the
+// player's own damage output) - defaults to 1.0f so every existing call site is unaffected;
+// zone_state.cpp passes the Iron Skin trait's live multiplier here.
+bool tickCombat(CombatantState& player, CombatantState& enemy, double dtSeconds,
+                 float incomingDamageMultiplier = 1.0f);
 
 bool isDefeated(const CombatantState& c);
