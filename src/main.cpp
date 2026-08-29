@@ -65,11 +65,10 @@ void setup() {
     M5.begin(cfg);
 
     // Rotates the panel from its native portrait orientation to landscape (width() becomes
-    // 1280, height() becomes 720) for the MapleStory-style wide side-view zone. Rotation value
-    // 1 is an unconfirmed guess (M5GFX convention: even rotations are typically a panel's
-    // native orientation, odd rotations are the 90-degree-rotated one) - if the image appears
-    // mirrored or upside-down on real hardware, try 3 instead.
-    M5.Display.setRotation(1);
+    // 1280, height() becomes 720) for the MapleStory-style wide side-view zone. Rotation 3
+    // (rather than 1, the other landscape option 180 degrees apart) so the image reads right
+    // side up with the device's keyboard attachment docked below the screen.
+    M5.Display.setRotation(3);
 
     Serial.begin(115200);
     delay(200);

@@ -8,7 +8,7 @@
 
 // The real M5Tab5 panel's native hardware orientation is portrait (720x1280, confirmed against
 // the fetched M5GFX source - NOT the 1280x720 landscape shape it's often assumed to be).
-// main.cpp's setup() rotates it to landscape (setRotation(1)) for the MapleStory-style wide
+// main.cpp's setup() rotates it to landscape (setRotation(3)) for the MapleStory-style wide
 // zone view, giving width()==1280/height()==720 from here on - the layout below is still a
 // vertical stack (header -> zone viewport -> stats panel), computed at runtime from
 // M5.Display.width()/.height() rather than hardcoded, so it adapts to whichever rotation is
