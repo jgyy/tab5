@@ -1,5 +1,6 @@
 #include <M5Unified.h>
 #include "economy.h"
+#include "ascension.h"
 #include "save.h"
 #include "nvs_store.h"
 #include "rtc_store.h"
@@ -39,6 +40,7 @@ constexpr uint32_t kZoneFrameIntervalMs = 33; // ~30fps cap
 constexpr int64_t kRtcFallbackEpochSeconds = 1787844399;
 
 GameState gState;
+AscensionState gAscensionState;
 ZoneState gZoneState;
 // The pre-tick copy of gZoneState that deriveZoneTickEvents() compares against. Kept at file
 // scope and reassigned in place (rather than declared as a fresh local in loop()) because
@@ -56,7 +58,7 @@ uint8_t gVolume = kMaxVolume / 2;
 
 void saveNow() {
     int64_t nowEpoch = readRtcEpochSeconds();
-    nvsWriteSave(toSaveData(gState, nowEpoch, gBrightness, gVolume));
+    nvsWriteSave(toSaveData(gState, nowEpoch, gBrightness, gVolume, gAscensionState));
 }
 }
 
@@ -87,7 +89,7 @@ void setup() {
 
     if (save.lastSaveEpochSeconds != 0) {
         GameState priorState = toGameState(save);
-        double rateAtSave = qiPerSecond(priorState);
+        double rateAtSave = qiPerSecond(priorState, qiMultiplierForInsight(toAscensionState(save).insight));
         double offlineQi = computeOfflineEarnings(nowEpoch, save.lastSaveEpochSeconds,
                                                     rateAtSave, 24 * 3600);
         save.qi += offlineQi;
@@ -111,6 +113,7 @@ void setup() {
     }
 
     gState = toGameState(save);
+    gAscensionState = toAscensionState(save);
 
     gBrightness = clampBrightness(save.brightness);
     gVolume = clampVolume(save.volume);
@@ -143,7 +146,7 @@ void loop() {
 
     if (now - gLastTickMs >= kTickIntervalMs) {
         double dt = (now - gLastTickMs) / 1000.0;
-        tick(gState, dt);
+        tick(gState, dt, qiMultiplierForInsight(gAscensionState.insight));
         gLastTickMs = now;
 
         // Automation: breakthrough first, then auto-buy — deliberately in that order.
@@ -163,6 +166,16 @@ void loop() {
             }
             triggerRealmBreakthroughFx();
             playBreakthroughSfx();
+        }
+        // Ascension: checked once, after breakthroughs resolve (not interleaved) - a large
+        // offline-earnings injection should finish climbing to realm 15 first, then ascend, in
+        // the same tick. A plain `if`, not `while`: attemptAscend() resets qi to 0, and the next
+        // ascension threshold is strictly positive, so a second ascension can never fire in the
+        // same tick.
+        if (canAscend(gState, gAscensionState)) {
+            attemptAscend(gState, gAscensionState);
+            triggerAscensionFx();
+            playAscensionSfx();
         }
         // One purchase attempt per generator per tick (not loop-until-can't-afford) —
         // natural accumulation across many ticks at 20Hz is plenty responsive, and index
@@ -242,7 +255,7 @@ void loop() {
         gState.qi += gZoneState.qiRewardPending;
         saveNow();
         renderZoneView(M5.Display, gZoneState); // show the cleared frame...
-        drawHud(M5.Display, gState, gZoneState); // ...with "Cleared!" in the monsters bar, before pausing
+        drawHud(M5.Display, gState, gZoneState, gAscensionState); // ...with "Cleared!" in the monsters bar, before pausing
         gLastHudDrawMs = now; // this was an explicit/forced draw; keep the throttle in sync
         gLastZoneRenderMs = now; // ditto for the zone-frame throttle below
         delay(1500);
@@ -256,7 +269,7 @@ void loop() {
     }
 
     if (now - gLastHudDrawMs >= kHudRedrawIntervalMs) {
-        drawHud(M5.Display, gState, gZoneState);
+        drawHud(M5.Display, gState, gZoneState, gAscensionState);
         gLastHudDrawMs = now;
     }
 }

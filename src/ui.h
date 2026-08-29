@@ -4,6 +4,7 @@
 #include "economy.h"
 #include "zone_state.h"
 #include "hittest.h"
+#include "ascension.h"
 
 
 // The real M5Tab5 panel's native hardware orientation is portrait (720x1280, confirmed against
@@ -36,7 +37,8 @@ void initHud(M5GFX& display);
 // HP, enemy HP (empty when not currently fighting), monsters-defeated route progress, and
 // breakthrough progress - all read-only, driven entirely by automation. There is nothing left
 // to tap anywhere on screen.
-void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone);
+void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
+             const AscensionState& ascension);
 
 // Compact K/M/B display formatting for Qi-scale numbers (e.g. "2.2M" instead of
 // "2200000"); exposed so main.cpp's welcome-back screen can format consistently

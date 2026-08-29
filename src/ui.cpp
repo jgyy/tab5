@@ -272,7 +272,7 @@ void drawBar(M5Canvas& canvas, const Rect& r, float fraction, uint16_t fillColor
 constexpr int kPortraitRadius = 22;
 constexpr int kPortraitMargin = 12;
 
-void drawHeader(M5GFX& display, const GameState& state) {
+void drawHeader(M5GFX& display, const GameState& state, const AscensionState& ascension) {
     M5Canvas& hdr = *gHeaderCanvas;
     constexpr uint16_t kHeaderBg = 0x18E3; // dark navy-grey, distinct from the panel's black
     hdr.fillScreen(kHeaderBg);
@@ -293,9 +293,20 @@ void drawHeader(M5GFX& display, const GameState& state) {
     hdr.fillCircle(portraitCx, headerCenterY, kPortraitRadius / 3, TFT_WHITE);
 
     char qiRateStr[24];
-    formatQi(qiPerSecond(state), qiRateStr, sizeof(qiRateStr));
-    char leftBuf[64];
-    snprintf(leftBuf, sizeof(leftBuf), "%s  Qi/s %s", REALM_NAMES[state.realmIndex], qiRateStr);
+    formatQi(qiPerSecond(state, qiMultiplierForInsight(ascension.insight)), qiRateStr, sizeof(qiRateStr));
+    // Only shown once the player has ascended at least once, so a fresh game's header (the
+    // common case for a first-time player) stays exactly as compact as it was before this
+    // feature existed.
+    char leftBuf[80];
+    if (ascension.ascensionCount > 0) {
+        char multBuf[16];
+        snprintf(multBuf, sizeof(multBuf), "%.2f", qiMultiplierForInsight(ascension.insight));
+        snprintf(leftBuf, sizeof(leftBuf), "%s  Qi/s %s  Asc %u (x%s)",
+                 REALM_NAMES[state.realmIndex], qiRateStr, static_cast<unsigned>(ascension.ascensionCount),
+                 multBuf);
+    } else {
+        snprintf(leftBuf, sizeof(leftBuf), "%s  Qi/s %s", REALM_NAMES[state.realmIndex], qiRateStr);
+    }
 
     // No clock/time-of-day display: without NTP/internet sync (out of scope for this
     // project), a displayed clock would silently drift from real time, which is worse
@@ -335,9 +346,10 @@ void initHud(M5GFX& display) {
     gPanelCanvas->createSprite(gLayout.screenW, gLayout.panelH);
 }
 
-void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone) {
+void drawHud(M5GFX& display, const GameState& state, const ZoneState& zone,
+             const AscensionState& ascension) {
     if (!gPanelCanvas) initHud(display);
-    drawHeader(display, state);
+    drawHeader(display, state, ascension);
 
     M5Canvas& panel = *gPanelCanvas;
     drawPanelFrame(panel);
