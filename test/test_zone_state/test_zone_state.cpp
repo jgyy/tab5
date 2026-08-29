@@ -1,6 +1,7 @@
 #include <unity.h>
 #include <cmath>
 #include "zone_state.h"
+#include "traits.h"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -684,6 +685,210 @@ void test_boss_zone_clear_rate_is_challenging_but_reasonable_at_high_realm(void)
     TEST_ASSERT_TRUE(cleared >= kTrials * 7 / 10);
 }
 
+// --- Iron Skin ---
+// Reuses one ZoneState/enemy across two tickZone() calls, varying only the currentRealmIndex
+// argument each call - this isolates the trait's effect from realm-based enemy/player stat
+// scaling (which is fixed once at zone start), the same technique the existing boss tests use
+// to force specific HP values instead of waiting out real damage.
+void test_iron_skin_reduces_damage_taken_in_zone(void) {
+    ZoneMap m = makeZoneMap(0);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) tickZone(s, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+
+    s.enemy.attackDamage = 20; // fixed, known value
+    s.player.hp = s.player.maxHp;
+    tickZone(s, 1.2, 10.0, 0); // realm 0 -> no Iron Skin -> full 20 damage
+    int damageWithoutTrait = s.player.maxHp - s.player.hp;
+    TEST_ASSERT_EQUAL_INT(20, damageWithoutTrait);
+
+    s.player.hp = s.player.maxHp; // reset for a clean second hit
+    tickZone(s, 1.2, 10.0, 1); // realm 1 -> Iron Skin active -> reduced damage
+    int damageWithTrait = s.player.maxHp - s.player.hp;
+    TEST_ASSERT_TRUE(damageWithTrait < damageWithoutTrait);
+}
+
+// --- Steady Breath ---
+// dt (0.9s) is kept below both combatants' attack cooldowns (1.0s/1.2s), and both timers are
+// freshly zeroed at the Walking->Fighting transition this loop just stopped on - so no
+// autoattack lands in this single tick on either side, isolating regen-only HP change.
+void test_steady_breath_regenerates_hp_while_fighting(void) {
+    ZoneMap m = makeZoneMap(0);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) tickZone(s, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    s.player.hp = s.player.maxHp - 50;
+    int hpBefore = s.player.hp;
+    tickZone(s, 0.9, 10.0, 3); // realm 3 -> Steady Breath active
+    TEST_ASSERT_TRUE(s.player.hp > hpBefore);
+}
+
+void test_without_steady_breath_hp_does_not_regenerate(void) {
+    ZoneMap m = makeZoneMap(0);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) tickZone(s, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    s.player.hp = s.player.maxHp - 50;
+    int hpBefore = s.player.hp;
+    tickZone(s, 0.9, 10.0, 0); // realm 0 -> no Steady Breath
+    TEST_ASSERT_EQUAL_INT(hpBefore, s.player.hp);
+}
+
+// --- Soul Echo --- (isolated at unlockRealmIndex-1 vs unlockRealmIndex, so every
+// already-active lower trait is held constant between the two branches and only Soul Echo
+// itself differs)
+//
+// The enemy's 1.2s cooldown doesn't divide evenly into this test's 1.0s-per-tick loop, so its
+// attack timer accumulates across calls and it lands a hit on the player partway through (at
+// call 2, and again at call 4) - if that were allowed to defeat the player, isDefeated() would
+// call restartZone() and silently swap in a brand new map/enemy mid-loop, invalidating the
+// "same enemy, 4 landed autoattacks" measurement below. Both player and enemy get an enormous
+// HP buffer so neither can die mid-test; only the *enemy's* HP delta is actually measured.
+void test_soul_echo_adds_bonus_damage_on_the_fourth_landed_autoattack(void) {
+    ZoneMap m1 = makeZoneMap(0);
+    ZoneState s4 = startZone(m1, 0);
+    for (int i = 0; i < 500 && s4.phase != ZonePhase::Fighting; ++i) tickZone(s4, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s4.phase == ZonePhase::Fighting);
+    s4.player.hp = 1000000; s4.player.maxHp = 1000000; // invincible for this measurement
+    s4.enemy.hp = 100000; s4.enemy.maxHp = 100000;      // never dies mid-test either
+    for (int i = 0; i < 4; ++i) tickZone(s4, 1.0, 10.0, 4); // realm 4: no Soul Echo yet
+    int damageAtRealm4 = 100000 - s4.enemy.hp;
+    TEST_ASSERT_TRUE(s4.phase == ZonePhase::Fighting); // confirms it's still the same encounter
+
+    ZoneMap m2 = makeZoneMap(0);
+    ZoneState s5 = startZone(m2, 0);
+    for (int i = 0; i < 500 && s5.phase != ZonePhase::Fighting; ++i) tickZone(s5, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s5.phase == ZonePhase::Fighting);
+    s5.player.hp = 1000000; s5.player.maxHp = 1000000;
+    s5.enemy.hp = 100000; s5.enemy.maxHp = 100000;
+    for (int i = 0; i < 4; ++i) tickZone(s5, 1.0, 10.0, 5); // realm 5: Soul Echo active
+    int damageAtRealm5 = 100000 - s5.enemy.hp;
+    TEST_ASSERT_TRUE(s5.phase == ZonePhase::Fighting);
+
+    TEST_ASSERT_TRUE(damageAtRealm5 > damageAtRealm4);
+    TEST_ASSERT_EQUAL_INT(4, s5.playerAutoAttackCount);
+}
+
+// --- Execution ---
+void test_execution_adds_bonus_damage_finishing_a_weakened_enemy(void) {
+    ZoneMap m1 = makeZoneMap(0);
+    ZoneState s6 = startZone(m1, 0);
+    for (int i = 0; i < 500 && s6.phase != ZonePhase::Fighting; ++i) tickZone(s6, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s6.phase == ZonePhase::Fighting);
+    s6.enemy.maxHp = 1000;
+    s6.enemy.hp = static_cast<int>(s6.enemy.maxHp * 0.15); // already below the 20% threshold
+    tickZone(s6, 1.0, 10.0, 6); // realm 6: no Execution yet
+    int hpAtRealm6 = s6.enemy.hp;
+
+    ZoneMap m2 = makeZoneMap(0);
+    ZoneState s7 = startZone(m2, 0);
+    for (int i = 0; i < 500 && s7.phase != ZonePhase::Fighting; ++i) tickZone(s7, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s7.phase == ZonePhase::Fighting);
+    s7.enemy.maxHp = 1000;
+    s7.enemy.hp = static_cast<int>(s7.enemy.maxHp * 0.15);
+    tickZone(s7, 1.0, 10.0, 7); // realm 7: Execution active
+    int hpAtRealm7 = s7.enemy.hp;
+
+    TEST_ASSERT_TRUE(hpAtRealm7 < hpAtRealm6);
+}
+
+// --- Swift Feet ---
+void test_swift_feet_increases_walking_speed(void) {
+    ZoneMap m = makeZoneMap(0);
+    ZoneState s0 = startZone(m, 0);
+    tickZone(s0, 0.1, 10.0, 0); // realm 0: no Swift Feet
+
+    ZoneState s9 = startZone(m, 0); // fresh state, same map
+    tickZone(s9, 0.1, 10.0, 9); // realm 9: Swift Feet active
+
+    TEST_ASSERT_TRUE(s9.posX > s0.posX);
+}
+
+void test_swift_feet_shortens_jump_duration(void) {
+    JumpArc normal = makeJumpArc(0.0f, 0.0f, 2.0f, 0.0f);
+    JumpArc fast = makeJumpArc(0.0f, 0.0f, 2.0f, 0.0f, 1.3f);
+    TEST_ASSERT_TRUE(fast.duration < normal.duration);
+}
+
+// --- Radiant Aura ---
+void test_radiant_aura_ticks_extra_damage_independent_of_autoattack(void) {
+    ZoneMap m1 = makeZoneMap(0);
+    ZoneState s10 = startZone(m1, 0);
+    for (int i = 0; i < 500 && s10.phase != ZonePhase::Fighting; ++i) tickZone(s10, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s10.phase == ZonePhase::Fighting);
+    s10.enemy.hp = s10.enemy.maxHp;
+    tickZone(s10, 2.0, 10.0, 10); // realm 10: no Radiant Aura yet
+    int damageAtRealm10 = s10.enemy.maxHp - s10.enemy.hp;
+
+    ZoneMap m2 = makeZoneMap(0);
+    ZoneState s11 = startZone(m2, 0);
+    for (int i = 0; i < 500 && s11.phase != ZonePhase::Fighting; ++i) tickZone(s11, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s11.phase == ZonePhase::Fighting);
+    s11.enemy.hp = s11.enemy.maxHp;
+    tickZone(s11, 2.0, 10.0, 11); // realm 11: Radiant Aura active, ticks once at t=2.0s
+    int damageAtRealm11 = s11.enemy.maxHp - s11.enemy.hp;
+
+    TEST_ASSERT_TRUE(damageAtRealm11 > damageAtRealm10);
+}
+
+// --- Undying Will ---
+void test_undying_will_survives_one_fatal_hit_per_run(void) {
+    ZoneMap m = makeZoneMap(0);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) tickZone(s, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+
+    s.player.hp = 1;
+    s.enemy.attackTimer = s.enemy.attackCooldownSeconds; // guarantees the enemy's attack lands
+    int zoneRunIndexBefore = s.zoneRunIndex;
+    tickZone(s, 0.01, 10.0, 13); // realm 13: Undying Will saves the player instead of restarting
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    TEST_ASSERT_EQUAL_INT(1, s.player.hp);
+    TEST_ASSERT_TRUE(s.undyingWillUsedThisRun);
+    TEST_ASSERT_EQUAL_INT(zoneRunIndexBefore, s.zoneRunIndex); // restartZone() would have bumped this
+
+    // A second would-be-fatal hit in the same run must NOT be saved again.
+    s.player.hp = 1;
+    s.enemy.attackTimer = s.enemy.attackCooldownSeconds;
+    tickZone(s, 0.01, 10.0, 13);
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Walking); // restartZone() reset it this time
+}
+
+void test_without_undying_will_a_fatal_hit_restarts_the_zone(void) {
+    ZoneMap m = makeZoneMap(0);
+    ZoneState s = startZone(m, 0);
+    for (int i = 0; i < 500 && s.phase != ZonePhase::Fighting; ++i) tickZone(s, 0.1, 10.0, 0);
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Fighting);
+    s.player.hp = 1;
+    s.enemy.attackTimer = s.enemy.attackCooldownSeconds;
+    tickZone(s, 0.01, 10.0, 12); // realm 12: no Undying Will yet
+    TEST_ASSERT_TRUE(s.phase == ZonePhase::Walking);
+    TEST_ASSERT_EQUAL_INT(s.player.maxHp, s.player.hp); // startZone() gave a fresh, full-HP player
+}
+
+// --- Empyrean Radiance ---
+void test_empyrean_radiance_amplifies_skill_damage(void) {
+    ZoneMap m1 = makeZoneMap(15);
+    ZoneState s14 = startZone(m1, 15);
+    for (int i = 0; i < 500 && s14.phase != ZonePhase::Fighting; ++i) tickZone(s14, 0.1, 10.0, 15);
+    TEST_ASSERT_TRUE(s14.phase == ZonePhase::Fighting);
+    s14.enemy.hp = 100000; s14.enemy.maxHp = 100000;
+    s14.skill.timer = SKILLS[0].cooldownSeconds; // guarantees a skill fires this tick
+    tickZone(s14, 0.01, 10.0, 14); // realm 14: no Empyrean Radiance yet
+    int damageAtRealm14 = 100000 - s14.enemy.hp;
+
+    ZoneMap m2 = makeZoneMap(15);
+    ZoneState s15 = startZone(m2, 15);
+    for (int i = 0; i < 500 && s15.phase != ZonePhase::Fighting; ++i) tickZone(s15, 0.1, 10.0, 15);
+    TEST_ASSERT_TRUE(s15.phase == ZonePhase::Fighting);
+    s15.enemy.hp = 100000; s15.enemy.maxHp = 100000;
+    s15.skill.timer = SKILLS[0].cooldownSeconds;
+    tickZone(s15, 0.01, 10.0, 15); // realm 15: Empyrean Radiance active
+    int damageAtRealm15 = 100000 - s15.enemy.hp;
+
+    TEST_ASSERT_TRUE(damageAtRealm15 > damageAtRealm14);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_start_zone_begins_walking_at_arena_start);
@@ -735,5 +940,16 @@ int main(int argc, char** argv) {
     RUN_TEST(test_boss_zone_clear_rate_is_challenging_but_reasonable_at_realm_zero);
     RUN_TEST(test_boss_zone_clear_rate_is_challenging_but_reasonable_at_low_realm);
     RUN_TEST(test_boss_zone_clear_rate_is_challenging_but_reasonable_at_high_realm);
+    RUN_TEST(test_iron_skin_reduces_damage_taken_in_zone);
+    RUN_TEST(test_steady_breath_regenerates_hp_while_fighting);
+    RUN_TEST(test_without_steady_breath_hp_does_not_regenerate);
+    RUN_TEST(test_soul_echo_adds_bonus_damage_on_the_fourth_landed_autoattack);
+    RUN_TEST(test_execution_adds_bonus_damage_finishing_a_weakened_enemy);
+    RUN_TEST(test_swift_feet_increases_walking_speed);
+    RUN_TEST(test_swift_feet_shortens_jump_duration);
+    RUN_TEST(test_radiant_aura_ticks_extra_damage_independent_of_autoattack);
+    RUN_TEST(test_undying_will_survives_one_fatal_hit_per_run);
+    RUN_TEST(test_without_undying_will_a_fatal_hit_restarts_the_zone);
+    RUN_TEST(test_empyrean_radiance_amplifies_skill_damage);
     return UNITY_END();
 }

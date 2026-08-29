@@ -26,7 +26,10 @@ struct JumpArc {
 // Builds a JumpArc from (fromX,fromY) to (toX,toY): duration is however long the horizontal
 // distance takes at kWalkSpeedUnitsPerSec, floored at kMinJumpDuration so even a same-x hop off
 // a ledge still visibly reads as a jump.
-JumpArc makeJumpArc(float fromX, float fromY, float toX, float toY);
+// speedMultiplier scales the effective travel speed used to compute the arc's duration
+// (defaults to 1.0f, matching kWalkSpeedUnitsPerSec exactly) - zone_state.cpp passes the Swift
+// Feet trait's live multiplier here so jump duration scales consistently with walk speed.
+JumpArc makeJumpArc(float fromX, float fromY, float toX, float toY, float speedMultiplier = 1.0f);
 
 // Position along the arc at jump-elapsed-time `elapsed` (clamped to [0, arc.duration]): a
 // straight-line interpolation between the two endpoints, with a sin(pi*t) hump added to the
@@ -71,6 +74,10 @@ struct ZoneState {
                                           // reset every call, same contract as skillFiredThisTick
     bool bossJustDefeated = false;       // pulses true on the single tickZone() call a boss dies;
                                           // reset every call
+    int playerAutoAttackCount = 0;   // total landed player autoattacks this zone run (Soul Echo cadence)
+    float radiantAuraTimerSeconds = 0.0f; // advances only while Fighting; reset in startZone()
+    bool undyingWillUsedThisRun = false;  // latches true the first time it saves the player from
+                                           // a fatal hit; reset in startZone()
 };
 
 constexpr int kBossZoneInterval = 3; // every Nth zone loop is a boss zone

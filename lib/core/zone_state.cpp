@@ -1,11 +1,12 @@
 #include "zone_state.h"
+#include "traits.h"
 #include <cmath>
 
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
 }
 
-JumpArc makeJumpArc(float fromX, float fromY, float toX, float toY) {
+JumpArc makeJumpArc(float fromX, float fromY, float toX, float toY, float speedMultiplier) {
     JumpArc arc;
     arc.fromX = fromX;
     arc.fromY = fromY;
@@ -13,7 +14,7 @@ JumpArc makeJumpArc(float fromX, float fromY, float toX, float toY) {
     arc.toY = toY;
     arc.elapsed = 0.0f;
     float horizontalDistance = std::fabs(toX - fromX);
-    float duration = horizontalDistance / kWalkSpeedUnitsPerSec;
+    float duration = horizontalDistance / (kWalkSpeedUnitsPerSec * speedMultiplier);
     arc.duration = duration > kMinJumpDuration ? duration : kMinJumpDuration;
     return arc;
 }
@@ -68,6 +69,9 @@ ZoneState startZone(const ZoneMap& map, int realmIndex, int zoneRunIndex) {
     s.bossEnraged = false;
     s.bossJustEnraged = false;
     s.bossJustDefeated = false;
+    s.playerAutoAttackCount = 0;
+    s.radiantAuraTimerSeconds = 0.0f;
+    s.undyingWillUsedThisRun = false;
     return s;
 }
 
@@ -133,7 +137,8 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
             return;
         }
 
-        float step = kWalkSpeedUnitsPerSec * static_cast<float>(dtSeconds);
+        float step = kWalkSpeedUnitsPerSec * movementSpeedMultiplier(currentRealmIndex) *
+                     static_cast<float>(dtSeconds);
         float maxStep = walkTargetXOnCurrentPlatform(state) - state.posX;
         if (maxStep < 0.0f) maxStep = 0.0f;
         if (step > maxStep) step = maxStep;
@@ -160,7 +165,8 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
                 const Platform& next =
                     state.map.platforms[static_cast<size_t>(state.currentPlatformIndex + 1)];
                 float landingX = next.x0 + kLandingMargin;
-                state.jump = makeJumpArc(state.posX, platform.y, landingX, next.y);
+                state.jump = makeJumpArc(state.posX, platform.y, landingX, next.y,
+                                          movementSpeedMultiplier(currentRealmIndex));
                 state.phase = ZonePhase::Jumping;
             }
         }
@@ -180,11 +186,49 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
     }
 
     // Fighting
-    tickCombat(state.player, state.enemy, dtSeconds);
+    if (hasSteadyBreath(currentRealmIndex)) {
+        float newHp = static_cast<float>(state.player.hp) +
+                       regenPerSecond(currentRealmIndex, state.player.maxHp) * static_cast<float>(dtSeconds);
+        state.player.hp = newHp < static_cast<float>(state.player.maxHp)
+                               ? static_cast<int>(newHp)
+                               : state.player.maxHp;
+    }
+
+    int enemyHpBeforeAutoAttack = state.enemy.hp;
+    tickCombat(state.player, state.enemy, dtSeconds, incomingDamageMultiplier(currentRealmIndex));
+    bool playerAutoAttackLanded = state.enemy.hp < enemyHpBeforeAutoAttack;
+    if (playerAutoAttackLanded) {
+        state.playerAutoAttackCount += 1;
+        if (hasSoulEcho(currentRealmIndex) && state.playerAutoAttackCount % kSoulEchoInterval == 0) {
+            int bonus = static_cast<int>(state.player.attackDamage * kSoulEchoBonusMultiplier);
+            state.enemy.hp -= bonus;
+            if (state.enemy.hp < 0) state.enemy.hp = 0;
+        }
+        if (hasExecution(currentRealmIndex) && state.enemy.hp > 0 &&
+            state.enemy.hp <= static_cast<int>(state.enemy.maxHp * kExecutionHpFraction)) {
+            int bonus = static_cast<int>(state.player.attackDamage * kExecutionBonusMultiplier);
+            state.enemy.hp -= bonus;
+            if (state.enemy.hp < 0) state.enemy.hp = 0;
+        }
+    }
+
+    if (hasRadiantAura(currentRealmIndex)) {
+        state.radiantAuraTimerSeconds += static_cast<float>(dtSeconds);
+        if (state.radiantAuraTimerSeconds >= kRadiantAuraIntervalSeconds) {
+            state.radiantAuraTimerSeconds -= kRadiantAuraIntervalSeconds;
+            if (state.enemy.hp > 0) {
+                int auraDamage = static_cast<int>(state.player.attackDamage * kRadiantAuraDamageMultiplier);
+                state.enemy.hp -= auraDamage;
+                if (state.enemy.hp < 0) state.enemy.hp = 0;
+            }
+        }
+    }
+
     int firedSkill = tickSkill(state.skill, dtSeconds, currentRealmIndex);
     if (firedSkill >= 0) {
         state.skillFiredThisTick = firedSkill;
-        int skillDamage = static_cast<int>(state.player.attackDamage * SKILLS[firedSkill].damageMultiplier);
+        int skillDamage = static_cast<int>(state.player.attackDamage * SKILLS[firedSkill].damageMultiplier *
+                                            skillDamageMultiplier(currentRealmIndex));
         state.enemy.hp -= skillDamage;
         if (state.enemy.hp < 0) state.enemy.hp = 0;
     }
@@ -197,6 +241,13 @@ void tickZone(ZoneState& state, double dtSeconds, double proposedReward, int cur
         state.enemy.attackCooldownSeconds *= kBossEnrageCooldownMultiplier;
         state.bossEnraged = true;
         state.bossJustEnraged = true;
+    }
+
+    // Undying Will: a would-be-fatal hit is intercepted here, once per zone run, before the
+    // defeat check below ever sees a non-positive HP value.
+    if (state.player.hp <= 0 && hasUndyingWill(currentRealmIndex) && !state.undyingWillUsedThisRun) {
+        state.player.hp = 1;
+        state.undyingWillUsedThisRun = true;
     }
 
     // Player defeat is checked FIRST: tickCombat() can land both attacks in the same call
