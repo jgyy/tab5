@@ -2,6 +2,7 @@
 #include <unity.h>
 #include "save.h"
 #include "economy.h"
+#include "ascension.h"
 #include <cstring>
 
 void setUp(void) {}
@@ -30,6 +31,18 @@ struct LegacySaveDataV1 {
     uint32_t generatorCounts[NUM_GENERATORS] = {1, 0, 0, 0, 0, 0};
     uint8_t realmIndex = 0;
     int64_t lastSaveEpochSeconds = 0;
+};
+
+// Byte-for-byte the v2 (pre-ascension) SaveData layout (see save.cpp's private SaveDataV2).
+struct LegacySaveDataV2 {
+    uint32_t magic = SAVE_MAGIC;
+    uint16_t version = 2;
+    double qi = 0.0;
+    uint32_t generatorCounts[NUM_GENERATORS] = {1, 0, 0, 0, 0, 0};
+    uint8_t realmIndex = 0;
+    int64_t lastSaveEpochSeconds = 0;
+    uint8_t brightness = 200;
+    uint8_t volume = 128;
 };
 } // namespace
 
@@ -182,6 +195,74 @@ void test_deserialize_migrates_legacy_v1_save() {
     TEST_ASSERT_EQUAL_UINT8(128, migrated.volume);
 }
 
+void test_deserialize_migrates_legacy_v2_save(void) {
+    LegacySaveDataV2 legacy;
+    legacy.qi = 777.7;
+    legacy.generatorCounts[2] = 6;
+    legacy.realmIndex = 5;
+    legacy.lastSaveEpochSeconds = 1650000000;
+    legacy.brightness = 150;
+    legacy.volume = 90;
+
+    uint8_t buffer[sizeof(LegacySaveDataV2) + sizeof(uint32_t)];
+    std::memcpy(buffer, &legacy, sizeof(LegacySaveDataV2));
+    uint32_t checksum = fnv1aChecksumForTest(buffer, sizeof(LegacySaveDataV2));
+    std::memcpy(buffer + sizeof(LegacySaveDataV2), &checksum, sizeof(uint32_t));
+
+    SaveData migrated;
+    bool ok = deserializeSave(buffer, sizeof(buffer), migrated);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL_DOUBLE(777.7, migrated.qi);
+    TEST_ASSERT_EQUAL(6, migrated.generatorCounts[2]);
+    TEST_ASSERT_EQUAL(5, migrated.realmIndex);
+    TEST_ASSERT_EQUAL_INT64(1650000000, migrated.lastSaveEpochSeconds);
+    TEST_ASSERT_EQUAL_UINT8(150, migrated.brightness);
+    TEST_ASSERT_EQUAL_UINT8(90, migrated.volume);
+    TEST_ASSERT_EQUAL_UINT32(0, migrated.ascensionCount); // fresh-game default, v2 never had this
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, migrated.ascensionInsight);
+}
+
+void test_round_trip_preserves_ascension_fields(void) {
+    SaveData original;
+    original.qi = 10.0;
+    original.ascensionCount = 4;
+    original.ascensionInsight = 12.5;
+
+    uint8_t buffer[SAVE_BUFFER_SIZE];
+    serializeSave(original, buffer, sizeof(buffer));
+
+    SaveData restored;
+    TEST_ASSERT_TRUE(deserializeSave(buffer, sizeof(buffer), restored));
+    TEST_ASSERT_EQUAL_UINT32(4, restored.ascensionCount);
+    TEST_ASSERT_EQUAL_DOUBLE(12.5, restored.ascensionInsight);
+}
+
+void test_to_save_data_carries_ascension_state(void) {
+    GameState state;
+    AscensionState ascension;
+    ascension.ascensionCount = 2;
+    ascension.insight = 7.0;
+    SaveData saved = toSaveData(state, 42, 200, 128, ascension);
+    TEST_ASSERT_EQUAL_UINT32(2, saved.ascensionCount);
+    TEST_ASSERT_EQUAL_DOUBLE(7.0, saved.ascensionInsight);
+}
+
+void test_to_save_data_defaults_ascension_state_when_unspecified(void) {
+    GameState state;
+    SaveData saved = toSaveData(state, 42);
+    TEST_ASSERT_EQUAL_UINT32(0, saved.ascensionCount);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, saved.ascensionInsight);
+}
+
+void test_to_ascension_state_round_trip(void) {
+    SaveData data;
+    data.ascensionCount = 9;
+    data.ascensionInsight = 33.0;
+    AscensionState ascension = toAscensionState(data);
+    TEST_ASSERT_EQUAL_UINT32(9, ascension.ascensionCount);
+    TEST_ASSERT_EQUAL_DOUBLE(33.0, ascension.insight);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_round_trip_preserves_data);
@@ -195,5 +276,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_to_save_data_carries_brightness_and_volume);
     RUN_TEST(test_to_save_data_defaults_brightness_and_volume_when_unspecified);
     RUN_TEST(test_deserialize_migrates_legacy_v1_save);
+    RUN_TEST(test_deserialize_migrates_legacy_v2_save);
+    RUN_TEST(test_round_trip_preserves_ascension_fields);
+    RUN_TEST(test_to_save_data_carries_ascension_state);
+    RUN_TEST(test_to_save_data_defaults_ascension_state_when_unspecified);
+    RUN_TEST(test_to_ascension_state_round_trip);
     return UNITY_END();
 }

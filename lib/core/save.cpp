@@ -6,7 +6,7 @@ SaveData defaultSaveData() {
 }
 
 SaveData toSaveData(const GameState& state, int64_t epochSeconds, uint8_t brightness,
-                     uint8_t volume) {
+                     uint8_t volume, const AscensionState& ascension) {
     SaveData d;
     d.qi = state.qi;
     for (int i = 0; i < NUM_GENERATORS; ++i) {
@@ -16,6 +16,8 @@ SaveData toSaveData(const GameState& state, int64_t epochSeconds, uint8_t bright
     d.lastSaveEpochSeconds = epochSeconds;
     d.brightness = brightness;
     d.volume = volume;
+    d.ascensionCount = ascension.ascensionCount;
+    d.ascensionInsight = ascension.insight;
     return d;
 }
 
@@ -27,6 +29,13 @@ GameState toGameState(const SaveData& data) {
     }
     s.realmIndex = data.realmIndex;
     return s;
+}
+
+AscensionState toAscensionState(const SaveData& data) {
+    AscensionState a;
+    a.ascensionCount = data.ascensionCount;
+    a.insight = data.ascensionInsight;
+    return a;
 }
 
 namespace {
@@ -53,6 +62,22 @@ struct SaveDataV1 {
     int64_t lastSaveEpochSeconds = 0;
 };
 constexpr size_t SAVE_V1_BUFFER_SIZE = sizeof(SaveDataV1) + sizeof(uint32_t);
+
+// Byte-for-byte the v2 (pre-ascension) SaveData layout, kept only so deserializeSave() can
+// still read a save written before schema v3 existed and migrate it forward instead of
+// failing validation and silently resetting all progress back to a fresh game. Never write
+// this format - only ever read it, once, for migration.
+struct SaveDataV2 {
+    uint32_t magic = SAVE_MAGIC;
+    uint16_t version = 2;
+    double qi = 0.0;
+    uint32_t generatorCounts[NUM_GENERATORS] = {1, 0, 0, 0, 0, 0};
+    uint8_t realmIndex = 0;
+    int64_t lastSaveEpochSeconds = 0;
+    uint8_t brightness = 200;
+    uint8_t volume = 128;
+};
+constexpr size_t SAVE_V2_BUFFER_SIZE = sizeof(SaveDataV2) + sizeof(uint32_t);
 }
 
 size_t serializeSave(const SaveData& data, uint8_t* outBuffer, size_t bufferLen) {
@@ -103,6 +128,33 @@ bool deserializeSave(const uint8_t* buffer, size_t bufferLen, SaveData& outData)
             }
             migrated.realmIndex = legacy.realmIndex;
             migrated.lastSaveEpochSeconds = legacy.lastSaveEpochSeconds;
+            if (migrated.realmIndex >= NUM_REALMS) migrated.realmIndex = NUM_REALMS - 1;
+            outData = migrated;
+            return true;
+        }
+    }
+
+    // Fall back to the v2 (pre-ascension) layout: a save written before this schema change
+    // would otherwise fail every check above and silently reset all progress back to a fresh
+    // game on next boot - migrate it forward instead, same posture as the v1 fallback above.
+    if (bufferLen >= SAVE_V2_BUFFER_SIZE) {
+        SaveDataV2 legacy;
+        std::memcpy(&legacy, buffer, sizeof(SaveDataV2));
+
+        uint32_t storedChecksum;
+        std::memcpy(&storedChecksum, buffer + sizeof(SaveDataV2), sizeof(uint32_t));
+
+        if (fnv1aChecksum(buffer, sizeof(SaveDataV2)) == storedChecksum &&
+            legacy.magic == SAVE_MAGIC && legacy.version == 2) {
+            SaveData migrated; // ascensionCount/ascensionInsight take SaveData's fresh-game defaults
+            migrated.qi = legacy.qi;
+            for (int i = 0; i < NUM_GENERATORS; ++i) {
+                migrated.generatorCounts[i] = legacy.generatorCounts[i];
+            }
+            migrated.realmIndex = legacy.realmIndex;
+            migrated.lastSaveEpochSeconds = legacy.lastSaveEpochSeconds;
+            migrated.brightness = legacy.brightness;
+            migrated.volume = legacy.volume;
             if (migrated.realmIndex >= NUM_REALMS) migrated.realmIndex = NUM_REALMS - 1;
             outData = migrated;
             return true;

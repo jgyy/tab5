@@ -2,9 +2,10 @@
 #include <cstddef>
 #include <cstdint>
 #include "economy.h"
+#include "ascension.h"
 
 constexpr uint32_t SAVE_MAGIC = 0x51494732; // 'QIG2'; bump on breaking format changes
-constexpr uint16_t SAVE_VERSION = 2; // v2 added brightness/volume; see deserializeSave's v1 migration
+constexpr uint16_t SAVE_VERSION = 3; // v3 added ascension count/insight; see v1, v2 migrations in deserializeSave
 
 // NOTE: this struct contains compiler-inserted padding between fields (e.g. around the
 // uint8_t/int64_t tail), and the checksum in serializeSave()/deserializeSave() covers
@@ -25,6 +26,8 @@ struct SaveData {
     // Scale matches M5Unified's setBrightness()/Speaker.setVolume() (both take uint8_t 0-255).
     uint8_t brightness = 200;
     uint8_t volume = 128;
+    uint32_t ascensionCount = 0;
+    double ascensionInsight = 0.0;
 };
 
 constexpr size_t SAVE_BUFFER_SIZE = sizeof(SaveData) + sizeof(uint32_t); // payload + checksum
@@ -34,8 +37,9 @@ SaveData defaultSaveData();
 // brightness/volume default to fresh-game values for callers (like tests) that don't care
 // about device settings; main.cpp always passes the device's actual current values.
 SaveData toSaveData(const GameState& state, int64_t epochSeconds, uint8_t brightness = 200,
-                     uint8_t volume = 128);
+                     uint8_t volume = 128, const AscensionState& ascension = AscensionState());
 GameState toGameState(const SaveData& data);
+AscensionState toAscensionState(const SaveData& data);
 
 // Serializes `data` plus a trailing FNV-1a checksum into `outBuffer` (must be at least
 // SAVE_BUFFER_SIZE bytes). Returns bytes written, or 0 if the buffer is too small.
